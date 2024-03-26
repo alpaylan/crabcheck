@@ -98,3 +98,44 @@ fn quickcheck<T: Arbitrary>(f: fn(&T) -> bool) -> RunResult<T> {
     }
 }
 
+
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_quickcheck() {
+        let result = quickcheck(|x: &Vec<i32>| {
+            let mut copy = x.clone();
+            copy.reverse();
+            copy.reverse();
+            copy == *x
+        });
+        assert_eq!(result.passed, 100);
+        assert_eq!(result.discarded, 0);
+        assert!(result.counterexample.is_none());
+    }
+
+    #[test]
+    fn test_quickcheck_fail() {
+        let result = quickcheck(|x: &Vec<i32>| {
+            let mut copy = x.clone();
+            copy.reverse();
+            copy == *x
+        });
+        assert!(result.passed < 100);
+        assert!(result.counterexample.is_some());
+    }
+
+    #[test]
+    fn test_quickcheck_tuple() {
+        let result = quickcheck(|(x, y): &(Vec<i32>, i32)| {
+            let mut copy = x.clone();
+            copy.push(*y);
+
+            copy.len() == x.len() + 1
+        });
+        assert_eq!(result.passed, 100);
+        assert_eq!(result.discarded, 0);
+        assert!(result.counterexample.is_none());
+    }
+}
