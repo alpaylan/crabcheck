@@ -1,12 +1,3 @@
-
-# Crabcheck
-
-A WIP property-based testing library in Rust, built with generalized targeted-property testing in mind.
-
-
-Below is the usage example for the naive running loop, which can be found in `examples/insertion_sort_correctness.rs`.
-
-```rust
 use std::borrow::BorrowMut;
 
 use crabcheck::quickcheck::quickcheck;
@@ -56,4 +47,3 @@ fn main() {
     assert!(result.counterexample.is_some());
     println!("Counterexample: {:?}", result.counterexample);
 }
-```

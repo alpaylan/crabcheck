@@ -76,10 +76,10 @@ pub struct RunResult<T> {
     pub counterexample: Option<T>,
 }
 
-fn quickcheck<T: Arbitrary>(f: fn(&T) -> bool) -> RunResult<T> {
+pub fn quickcheck<T: Arbitrary>(f: fn(&mut T) -> bool) -> RunResult<T> {
     for i in 0..100 {
-        let input = T::generate();
-        match f(&input) {
+        let mut input = T::generate();
+        match f(&mut input) {
             true => continue,
             false => {
                 return RunResult {
@@ -99,12 +99,13 @@ fn quickcheck<T: Arbitrary>(f: fn(&T) -> bool) -> RunResult<T> {
 }
 
 
+#[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_quickcheck() {
-        let result = quickcheck(|x: &Vec<i32>| {
+        let result = quickcheck(|x: &mut Vec<i32>| {
             let mut copy = x.clone();
             copy.reverse();
             copy.reverse();
@@ -117,7 +118,7 @@ mod tests {
 
     #[test]
     fn test_quickcheck_fail() {
-        let result = quickcheck(|x: &Vec<i32>| {
+        let result = quickcheck(|x: &mut Vec<i32>| {
             let mut copy = x.clone();
             copy.reverse();
             copy == *x
@@ -128,7 +129,7 @@ mod tests {
 
     #[test]
     fn test_quickcheck_tuple() {
-        let result = quickcheck(|(x, y): &(Vec<i32>, i32)| {
+        let result = quickcheck(|(x, y): &mut (Vec<i32>, i32)| {
             let mut copy = x.clone();
             copy.push(*y);
 

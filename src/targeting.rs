@@ -123,3 +123,22 @@ pub fn prop_targeting_loop<Domain: Clone + Arbitrary + Mutate, Feedback: Clone +
         counterexample: None,
     }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_maximizing_targeting_loop() {
+        let result = maximizing_targeting_loop(|x: Vec<i32>| {
+            x.iter().sum()
+        }, |x: Vec<i32>, y: i32| {
+            y
+        });
+
+        let avg : i32 = <Vec<i32>>::generate().iter().sum();
+    
+        assert!(result.feedback > avg);
+    }
+}
