@@ -2,7 +2,9 @@
 name = "crabcheck"
 version = "0.1.0"
 edition = "2021"
-
+authors = ["Alperen Keles <akeles@umd.edu>"]
+license-file = "LICENSE"
+description = "A WIP property-based testing library in Rust, built with generalized targeted-property testing in mind."
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
