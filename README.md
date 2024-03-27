@@ -1,17 +1,18 @@
-
 # Crabcheck
 
-A WIP property-based testing library in Rust, built with generalized targeted-property testing in mind.
+A WIP property-based testing library in Rust, built with generalized targeted-property testing in
+mind.
 
+## What is property-based testing?
 
-Below is the usage example for the naive running loop, which can be found in `examples/insertion_sort_correctness.rs`.
+TODO
+
+## Example usage
 
 ```rust
-use std::borrow::BorrowMut;
-
 use crabcheck::quickcheck::quickcheck;
 
-fn insertion_sort(arr: &mut [i32]) {
+fn correct_insertion_sort(arr: &mut [i32]) {
     for i in 1..arr.len() {
         let mut j = i;
         while j > 0 && arr[j - 1] > arr[j] {
@@ -21,7 +22,7 @@ fn insertion_sort(arr: &mut [i32]) {
     }
 }
 
-fn insertion_sort_false(arr: &mut [i32]) {
+fn bugged_insertion_sort(arr: &mut [i32]) {
     for i in 1..arr.len() - 1 {
         let mut j = i;
         while j > 0 && arr[j - 1] > arr[j] {
@@ -31,29 +32,26 @@ fn insertion_sort_false(arr: &mut [i32]) {
     }
 }
 
-fn is_sorted(arr: &[i32]) -> bool {
-    for i in 1..arr.len() {
-        if arr[i - 1] > arr[i] {
-            return false;
-        }
-    }
-    true
+fn is_sorted(array: &[i32]) -> bool {
+    array.windows(2).all(|window| window[0] <= window[1])
 }
 
 fn main() {
-    let result = quickcheck(|input: &mut Vec<i32>| {
-        insertion_sort(input);
+    let should_work = quickcheck(|input: &mut Vec<i32>| {
+        correct_insertion_sort(input);
         is_sorted(input)
     });
+    assert!(should_work.counterexample.is_none());
 
-    assert!(result.counterexample.is_none());
-
-    let result = quickcheck(|input: &mut Vec<i32>| {
-        insertion_sort_false(input);
+    let should_fail = quickcheck(|input: &mut Vec<i32>| {
+        bugged_insertion_sort(input);
         is_sorted(input)
     });
+    assert!(should_fail.counterexample.is_some());
 
-    assert!(result.counterexample.is_some());
-    println!("Counterexample: {:?}", result.counterexample);
+    println!(
+        "Counterexample that doesn't work on buggy implementation: {:?}",
+        should_fail.counterexample.unwrap(),
+    );
 }
 ```

@@ -1,8 +1,17 @@
-use crate::{
-    quickcheck::{Arbitrary, Mutate, RunResult},
-    seedpool::{Seed, SeedPool},
+use {
+    crate::{
+        quickcheck::{
+            Arbitrary,
+            Mutate,
+            RunResult,
+        },
+        seedpool::{
+            Seed,
+            SeedPool,
+        },
+    },
+    std::fmt::Debug,
 };
-use std::fmt::Debug;
 
 pub fn maximizing_targeting_loop<
     Domain: Clone + Arbitrary + Mutate,
@@ -19,10 +28,7 @@ pub fn maximizing_targeting_loop<
         if i % 1000 == 0 {
             println!("Iteration: {}", i);
             println!("Pool size: {}", pool.size());
-            println!(
-                "Best of all time: {:?}",
-                pool.best_of_all_time.clone().unwrap().feedback
-            );
+            println!("Best of all time: {:?}", pool.best_of_all_time.clone().unwrap().feedback);
             println!("====================\n");
         }
         let input = if let Some(seed) = pool.pop() {
@@ -34,24 +40,9 @@ pub fn maximizing_targeting_loop<
         let result = f(input.clone());
         let feedback = fb(input.clone(), result);
 
-        if pool.is_empty() {
-            let seed = Seed {
-                input,
-                feedback: feedback,
-                energy: 1000,
-            };
-
+        if pool.is_empty() || feedback > pool.best().clone().feedback {
+            let seed = Seed { input, feedback, energy: 1000 };
             pool.add_seed(seed);
-        } else {
-            if feedback > pool.best().clone().feedback {
-                let seed = Seed {
-                    input,
-                    feedback: feedback,
-                    energy: 1000,
-                };
-
-                pool.add_seed(seed);
-            }
         }
     }
 
@@ -69,10 +60,7 @@ pub fn prop_targeting_loop<Domain: Clone + Arbitrary + Mutate, Feedback: Clone +
         if i % 1000 == 0 {
             println!("Iteration: {}", i);
             println!("Pool size: {}", pool.size());
-            println!(
-                "Best of all time: {:?}",
-                pool.best_of_all_time.clone().unwrap().feedback
-            );
+            println!("Best of all time: {:?}", pool.best_of_all_time.clone().unwrap().feedback);
             println!("====================\n");
         }
         let input = if let Some(seed) = pool.pop() {
@@ -88,40 +76,17 @@ pub fn prop_targeting_loop<Domain: Clone + Arbitrary + Mutate, Feedback: Clone +
             return RunResult {
                 passed: i,
                 discarded: 0,
-                counterexample: Some(Seed {
-                    input: input,
-                    feedback: feedback,
-                    energy: 1000,
-                }),
+                counterexample: Some(Seed { input, feedback, energy: 1000 }),
             };
         }
 
-        if pool.is_empty() {
-            let seed = Seed {
-                input,
-                feedback: feedback,
-                energy: 1000,
-            };
-
+        if pool.is_empty() || feedback > pool.best().clone().feedback {
+            let seed = Seed { input, feedback, energy: 1000 };
             pool.add_seed(seed);
-        } else {
-            if feedback > pool.best().clone().feedback {
-                let seed = Seed {
-                    input,
-                    feedback: feedback,
-                    energy: 1000,
-                };
-
-                pool.add_seed(seed);
-            }
         }
     }
 
-    RunResult {
-        passed: fuel,
-        discarded: 0,
-        counterexample: None,
-    }
+    RunResult { passed: fuel, discarded: 0, counterexample: None }
 }
 
 
@@ -131,14 +96,11 @@ mod tests {
 
     #[test]
     fn test_maximizing_targeting_loop() {
-        let result = maximizing_targeting_loop(|x: Vec<i32>| {
-            x.iter().sum()
-        }, |x: Vec<i32>, y: i32| {
-            y
-        });
+        let result =
+            maximizing_targeting_loop(|x: Vec<i32>| x.iter().sum(), |_x: Vec<i32>, y: i32| y);
 
-        let avg : i32 = <Vec<i32>>::generate().iter().sum();
-    
+        let avg: i32 = <Vec<i32>>::generate().iter().sum();
+
         assert!(result.feedback > avg);
     }
 }

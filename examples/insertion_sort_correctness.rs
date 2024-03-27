@@ -1,49 +1,44 @@
-use std::borrow::BorrowMut;
-
 use crabcheck::quickcheck::quickcheck;
 
-fn insertion_sort(arr: &mut [i32]) {
-    for i in 1..arr.len() {
+fn correct_insertion_sort(array: &mut [i32]) {
+    for i in 1..array.len() {
         let mut j = i;
-        while j > 0 && arr[j - 1] > arr[j] {
-            arr.swap(j - 1, j);
+        while j > 0 && array[j - 1] > array[j] {
+            array.swap(j - 1, j);
             j -= 1;
         }
     }
 }
 
-fn insertion_sort_false(arr: &mut [i32]) {
-    for i in 1..arr.len() - 1 {
+fn bugged_insertion_sort(array: &mut [i32]) {
+    for i in 1..array.len() - 1 {
         let mut j = i;
-        while j > 0 && arr[j - 1] > arr[j] {
-            arr.swap(j - 1, j);
+        while j > 0 && array[j - 1] > array[j] {
+            array.swap(j - 1, j);
             j -= 1;
         }
     }
 }
 
-fn is_sorted(arr: &[i32]) -> bool {
-    for i in 1..arr.len() {
-        if arr[i - 1] > arr[i] {
-            return false;
-        }
-    }
-    true
+fn is_sorted(array: &[i32]) -> bool {
+    array.windows(2).all(|window| window[0] <= window[1])
 }
 
 fn main() {
-    let result = quickcheck(|input: &mut Vec<i32>| {
-        insertion_sort(input);
+    let should_work = quickcheck(|input: &mut Vec<i32>| {
+        correct_insertion_sort(input);
         is_sorted(input)
     });
+    assert!(should_work.counterexample.is_none());
 
-    assert!(result.counterexample.is_none());
-
-    let result = quickcheck(|input: &mut Vec<i32>| {
-        insertion_sort_false(input);
+    let should_fail = quickcheck(|input: &mut Vec<i32>| {
+        bugged_insertion_sort(input);
         is_sorted(input)
     });
+    assert!(should_fail.counterexample.is_some());
 
-    assert!(result.counterexample.is_some());
-    println!("Counterexample: {:?}", result.counterexample);
+    println!(
+        "Counterexample that doesn't work on buggy implementation: {:?}",
+        should_fail.counterexample.unwrap(),
+    );
 }
