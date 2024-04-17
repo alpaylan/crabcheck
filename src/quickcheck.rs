@@ -69,11 +69,21 @@ impl<T1: Mutate, T2: Mutate> Mutate for (T1, T2) {
     }
 }
 
-
+#[derive(Debug, Clone)]
 pub struct RunResult<T> {
     pub passed: usize,
     pub discarded: usize,
     pub counterexample: Option<T>,
+}
+
+impl<T> RunResult<T> {
+    pub fn default() -> RunResult<T> {
+        RunResult {
+            passed: 0,
+            discarded: 0,
+            counterexample: None,
+        }
+    }
 }
 
 pub fn quickcheck<T: Arbitrary>(f: fn(&mut T) -> bool) -> RunResult<T> {
@@ -97,7 +107,6 @@ pub fn quickcheck<T: Arbitrary>(f: fn(&mut T) -> bool) -> RunResult<T> {
         counterexample: None,
     }
 }
-
 
 #[cfg(test)]
 mod tests {
