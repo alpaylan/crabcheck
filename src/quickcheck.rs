@@ -43,7 +43,7 @@ impl Arbitrary for Vec<i32> {
 impl Mutate for Vec<i32> {
     fn mutate(&self) -> Vec<i32> {
         let mut copy = self.clone();
-        
+
         // Pick a portion of the list and mutate it
         let mut rng = rand::thread_rng();
         let a = rng.gen_range(0..self.len());
@@ -70,21 +70,11 @@ impl<T1: Mutate, T2: Mutate> Mutate for (T1, T2) {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Default, Debug, Clone)]
 pub struct RunResult<T> {
     pub passed: usize,
     pub discarded: usize,
     pub counterexample: Option<T>,
-}
-
-impl<T> RunResult<T> {
-    pub fn default() -> RunResult<T> {
-        RunResult {
-            passed: 0,
-            discarded: 0,
-            counterexample: None,
-        }
-    }
 }
 
 pub fn quickcheck<T: Arbitrary>(f: fn(&mut T) -> bool) -> RunResult<T> {

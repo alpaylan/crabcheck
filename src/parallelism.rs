@@ -1,9 +1,16 @@
 use std::{
     fmt::Debug,
-    sync::{atomic::AtomicBool, Arc, Mutex},
+    sync::{
+        atomic::AtomicBool,
+        Arc,
+        Mutex,
+    },
 };
 
-use crate::quickcheck::{Arbitrary, RunResult};
+use crate::quickcheck::{
+    Arbitrary,
+    RunResult,
+};
 
 pub fn par_quickcheck<T: Arbitrary + Sync + Send + Debug + Clone + 'static>(
     f: fn(&mut T) -> bool,
@@ -34,7 +41,7 @@ pub fn par_quickcheck<T: Arbitrary + Sync + Send + Debug + Clone + 'static>(
                         });
                         done.store(true, std::sync::atomic::Ordering::Relaxed);
                         return;
-                    }
+                    },
                 }
             }
         });
@@ -48,11 +55,7 @@ pub fn par_quickcheck<T: Arbitrary + Sync + Send + Debug + Clone + 'static>(
     let result = result.lock().unwrap();
     match &*result {
         Some(result) => result.clone(),
-        None => RunResult {
-            passed: 100,
-            discarded: 0,
-            counterexample: None,
-        },
+        None => RunResult { passed: 100, discarded: 0, counterexample: None },
     }
 }
 
