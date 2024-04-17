@@ -1,4 +1,3 @@
-
 #[derive(Clone, Debug)]
 pub struct Seed<T: Clone, F: Clone + Ord> {
     pub input: T,
@@ -12,11 +11,8 @@ pub struct SeedPool<T: Clone, F: Clone + Ord> {
 }
 
 impl<T: Clone, F: Clone + Ord> SeedPool<T, F> {
-    pub fn new() -> Self {
-        Self {
-            seeds: vec![],
-            best_of_all_time: None,
-        }
+    pub fn new() -> SeedPool<T, F> {
+        SeedPool::default()
     }
 
     pub fn add_seed(&mut self, seed: Seed<T, F>) {
@@ -40,11 +36,7 @@ impl<T: Clone, F: Clone + Ord> SeedPool<T, F> {
     }
 
     pub fn pop(&mut self) -> Option<Seed<T, F>> {
-        if let Some((max_index, _)) = self
-            .seeds
-            .iter()
-            .enumerate()
-            .max_by_key(|(_, s)| &s.feedback)
+        if let Some((max_index, _)) = self.seeds.iter().enumerate().max_by_key(|(_, s)| &s.feedback)
         {
             let seed = self.seeds[max_index].clone();
 
@@ -65,5 +57,11 @@ impl<T: Clone, F: Clone + Ord> SeedPool<T, F> {
 
     pub fn is_empty(&self) -> bool {
         self.seeds.is_empty()
+    }
+}
+
+impl<T: Clone, F: Clone + Ord> Default for SeedPool<T, F> {
+    fn default() -> SeedPool<T, F> {
+        SeedPool { seeds: vec![], best_of_all_time: None }
     }
 }

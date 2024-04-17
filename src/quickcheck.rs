@@ -43,13 +43,14 @@ impl Arbitrary for Vec<i32> {
 impl Mutate for Vec<i32> {
     fn mutate(&self) -> Vec<i32> {
         let mut copy = self.clone();
+        
         // Pick a portion of the list and mutate it
         let mut rng = rand::thread_rng();
         let a = rng.gen_range(0..self.len());
         let b = rng.gen_range(a..self.len());
 
-        for i in a..b {
-            copy[i] = i32::generate();
+        for value in copy[a..b].iter_mut() {
+            *value = i32::generate();
         }
 
         copy
@@ -91,21 +92,11 @@ pub fn quickcheck<T: Arbitrary>(f: fn(&mut T) -> bool) -> RunResult<T> {
         let mut input = T::generate();
         match f(&mut input) {
             true => continue,
-            false => {
-                return RunResult {
-                    passed: i,
-                    discarded: 0,
-                    counterexample: Some(input),
-                }
-            }
+            false => return RunResult { passed: i, discarded: 0, counterexample: Some(input) },
         }
     }
 
-    RunResult {
-        passed: 100,
-        discarded: 0,
-        counterexample: None,
-    }
+    RunResult { passed: 100, discarded: 0, counterexample: None }
 }
 
 #[cfg(test)]

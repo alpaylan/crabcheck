@@ -1,12 +1,20 @@
 [package]
 name = "crabcheck"
+description = "A WIP property-based testing library in Rust, built with generalized targeted-property testing in mind."
+categories = ["algorithms", "development-tools::testing"]
+keywords = ["pbt", "fuzzing"]
+repository = "https://github.com/alpaylan/crabcheck"
 version = "0.1.0"
 edition = "2021"
-authors = ["Alperen Keles <akeles@umd.edu>"]
-license-file = "LICENSE"
-description = "A WIP property-based testing library in Rust, built with generalized targeted-property testing in mind."
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+license = "MIT"
+authors = [
+    "Alperen Keles <akeles@umd.edu>",
+    "Umut Şahin <umutsahin@protonmail.com>",
+]
 
 [dependencies]
-cpu-time = "1.0.0"
-rand = "0.8.5"
+cpu-time = "1.0"
+rand = "0.8"
+
+[lints.clippy]
+type_complexity = "allow"

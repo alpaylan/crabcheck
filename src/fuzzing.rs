@@ -1,8 +1,17 @@
-use crate::{
-    quickcheck::{Arbitrary, Mutate, RunResult},
-    seedpool::{Seed, SeedPool},
+use {
+    crate::{
+        quickcheck::{
+            Arbitrary,
+            Mutate,
+            RunResult,
+        },
+        seedpool::{
+            Seed,
+            SeedPool,
+        },
+    },
+    std::fmt::Debug,
 };
-use std::fmt::Debug;
 
 
 pub fn maximizing_fuzz_loop<
@@ -20,10 +29,7 @@ pub fn maximizing_fuzz_loop<
         if i % 1000 == 0 {
             println!("Iteration: {}", i);
             println!("Pool size: {}", pool.size());
-            println!(
-                "Best of all time: {:?}",
-                pool.best_of_all_time.clone().unwrap().feedback
-            );
+            println!("Best of all time: {:?}", pool.best_of_all_time.clone().unwrap().feedback);
             println!("====================\n");
         }
         let input = if let Some(seed) = pool.pop() {
@@ -35,24 +41,9 @@ pub fn maximizing_fuzz_loop<
         let copy = input.clone();
         let (_, feedback) = fb(Box::new(move || f(copy)));
 
-        if pool.is_empty() {
-            let seed = Seed {
-                input,
-                feedback: feedback,
-                energy: 1000,
-            };
-
+        if pool.is_empty() || feedback > pool.best().clone().feedback {
+            let seed = Seed { input, feedback, energy: 1000 };
             pool.add_seed(seed);
-        } else {
-            if feedback > pool.best().clone().feedback {
-                let seed = Seed {
-                    input,
-                    feedback: feedback,
-                    energy: 1000,
-                };
-
-                pool.add_seed(seed);
-            }
         }
     }
 
@@ -71,10 +62,7 @@ pub fn prop_fuzz_loop<Domain: Clone + Arbitrary + Mutate, Feedback: Clone + Ord 
         if i % 1000 == 0 {
             println!("Iteration: {}", i);
             println!("Pool size: {}", pool.size());
-            println!(
-                "Best of all time: {:?}",
-                pool.best_of_all_time.clone().unwrap().feedback
-            );
+            println!("Best of all time: {:?}", pool.best_of_all_time.clone().unwrap().feedback);
             println!("====================\n");
         }
         let input = if let Some(seed) = pool.pop() {
@@ -90,37 +78,14 @@ pub fn prop_fuzz_loop<Domain: Clone + Arbitrary + Mutate, Feedback: Clone + Ord 
             return RunResult {
                 passed: i,
                 discarded: 0,
-                counterexample: Some(Seed {
-                    input: input,
-                    feedback: feedback,
-                    energy: 1000,
-                }),
+                counterexample: Some(Seed { input, feedback, energy: 1000 }),
             };
         }
-        if pool.is_empty() {
-            let seed = Seed {
-                input,
-                feedback: feedback,
-                energy: 1000,
-            };
-
+        if pool.is_empty() || feedback > pool.best().clone().feedback {
+            let seed = Seed { input, feedback, energy: 1000 };
             pool.add_seed(seed);
-        } else {
-            if feedback > pool.best().clone().feedback {
-                let seed = Seed {
-                    input,
-                    feedback: feedback,
-                    energy: 1000,
-                };
-
-                pool.add_seed(seed);
-            }
         }
     }
 
-    RunResult {
-        passed: fuel,
-        discarded: 0,
-        counterexample: None,
-    }
+    RunResult { passed: fuel, discarded: 0, counterexample: None }
 }
