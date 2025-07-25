@@ -10,11 +10,12 @@ use {
             SeedPool,
         },
     },
+    rand::rngs::ThreadRng,
     std::fmt::Debug,
 };
 
 pub fn maximizing_targeting_loop<
-    Domain: Clone + Arbitrary + Mutate,
+    Domain: Clone + Debug + Arbitrary<ThreadRng> + Mutate<ThreadRng>,
     Codomain,
     Feedback: Clone + Ord + Debug,
 >(
@@ -22,7 +23,8 @@ pub fn maximizing_targeting_loop<
     fb: fn(Domain, Codomain) -> Feedback,
 ) -> Seed<Domain, Feedback> {
     let mut pool: SeedPool<Domain, Feedback> = SeedPool::new();
-    let fuel = 100000;
+    let fuel = 1000;
+    let mut rng = rand::thread_rng();
 
     for i in 1..=fuel {
         if i % 1000 == 0 {
@@ -32,9 +34,9 @@ pub fn maximizing_targeting_loop<
             println!("====================\n");
         }
         let input = if let Some(seed) = pool.pop() {
-            Domain::mutate(&seed.input)
+            Domain::mutate(&seed.input, &mut rng, (i as f32).log2() as usize)
         } else {
-            Domain::generate()
+            Domain::generate(&mut rng, (i as f32).log2() as usize)
         };
 
         let result = f(input.clone());
@@ -49,12 +51,16 @@ pub fn maximizing_targeting_loop<
     pool.best_of_all_time.unwrap().clone()
 }
 
-pub fn prop_targeting_loop<Domain: Clone + Arbitrary + Mutate, Feedback: Clone + Ord + Debug>(
+pub fn prop_targeting_loop<
+    Domain: Clone + Debug + Arbitrary<ThreadRng> + Mutate<ThreadRng>,
+    Feedback: Clone + Ord + Debug,
+>(
     f: fn(Domain) -> bool,
     fb: fn(Domain) -> Feedback,
-) -> RunResult<Seed<Domain, Feedback>> {
+) -> RunResult {
     let mut pool: SeedPool<Domain, Feedback> = SeedPool::new();
     let fuel = 100000;
+    let mut rng = rand::thread_rng();
 
     for i in 1..=fuel {
         if i % 1000 == 0 {
@@ -64,9 +70,9 @@ pub fn prop_targeting_loop<Domain: Clone + Arbitrary + Mutate, Feedback: Clone +
             println!("====================\n");
         }
         let input = if let Some(seed) = pool.pop() {
-            Domain::mutate(&seed.input)
+            Domain::mutate(&seed.input, &mut rng, (i as f32).log2() as usize)
         } else {
-            Domain::generate()
+            Domain::generate(&mut rng, (i as f32).log2() as usize)
         };
 
         let result = f(input.clone());
@@ -76,7 +82,7 @@ pub fn prop_targeting_loop<Domain: Clone + Arbitrary + Mutate, Feedback: Clone +
             return RunResult {
                 passed: i,
                 discarded: 0,
-                counterexample: Some(Seed { input, feedback, energy: 1000 }),
+                counterexample: Some(format!("{:?}", input)),
             };
         }
 
@@ -99,7 +105,7 @@ mod tests {
         let result =
             maximizing_targeting_loop(|x: Vec<i32>| x.iter().sum(), |_x: Vec<i32>, y: i32| y);
 
-        let avg: i32 = <Vec<i32>>::generate().iter().sum();
+        let avg: i32 = <Vec<i32>>::generate(&mut rand::thread_rng(), 100).iter().sum();
 
         assert!(result.feedback > avg);
     }

@@ -1,0 +1,11 @@
+{
+    "files": {
+      "maxSize": 10000000
+    },
+    "formatter": {
+      "enabled": true,
+      "indentWidth": 2,
+      "lineWidth": 160
+    }
+  }
+  

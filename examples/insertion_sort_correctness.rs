@@ -25,15 +25,15 @@ fn is_sorted(array: &[i32]) -> bool {
 }
 
 fn main() {
-    let should_work = quickcheck(|input: &mut Vec<i32>| {
-        correct_insertion_sort(input);
-        is_sorted(input)
+    let should_work = quickcheck(|mut input: Vec<i32>| {
+        correct_insertion_sort(&mut input);
+        Some(is_sorted(&input))
     });
     assert!(should_work.counterexample.is_none());
 
-    let should_fail = quickcheck(|input: &mut Vec<i32>| {
-        bugged_insertion_sort(input);
-        is_sorted(input)
+    let should_fail = quickcheck(|mut input: Vec<i32>| {
+        bugged_insertion_sort(&mut input);
+        Some(is_sorted(&mut input))
     });
     assert!(should_fail.counterexample.is_some());
 

@@ -14,7 +14,15 @@ authors = [
 
 [dependencies]
 cpu-time = "1.0"
+glob = "0.3.2"
 rand = "0.8"
+rand_chacha = { version = "0.9.0", features = ["serde"] }
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.140"
+
+[features]
+profiling = []
+tracing = []
 
 [lints.clippy]
 type_complexity = "allow"

@@ -1,35 +1,37 @@
 use std::{
     fmt::Debug,
     sync::{
-        atomic::AtomicBool,
         Arc,
         Mutex,
+        atomic::AtomicBool,
     },
 };
+
+use rand::rngs::ThreadRng;
 
 use crate::quickcheck::{
     Arbitrary,
     RunResult,
 };
 
-pub fn par_quickcheck<T: Arbitrary + Sync + Send + Debug + Clone + 'static>(
+pub fn par_quickcheck<T: Arbitrary<ThreadRng> + Sync + Send + Debug + Clone + 'static>(
     f: fn(&mut T) -> bool,
-) -> RunResult<T> {
-    let result: Arc<Mutex<Option<RunResult<T>>>> = Arc::new(Mutex::new(None));
+) -> RunResult {
+    let result: Arc<Mutex<Option<RunResult>>> = Arc::new(Mutex::new(None));
     let done = Arc::new(AtomicBool::new(false));
-
     let mut threads = vec![];
 
     for _ in 0..4 {
         let done = done.clone();
         let result = result.clone();
         let thread = std::thread::spawn(move || {
+            let mut rng = rand::thread_rng();
             for i in 0..100 {
                 if done.load(std::sync::atomic::Ordering::Relaxed) {
                     return;
                 }
 
-                let mut input = T::generate();
+                let mut input = T::generate(&mut rng, ((i + 1) as f32).log2() as usize);
                 match f(&mut input) {
                     true => continue,
                     false => {
@@ -37,7 +39,7 @@ pub fn par_quickcheck<T: Arbitrary + Sync + Send + Debug + Clone + 'static>(
                         *result = Some(RunResult {
                             passed: i,
                             discarded: 0,
-                            counterexample: Some(input),
+                            counterexample: Some(format!("{:?}", input)),
                         });
                         done.store(true, std::sync::atomic::Ordering::Relaxed);
                         return;

@@ -1,3 +1,5 @@
+use rand::rngs::ThreadRng;
+
 use {
     crate::{
         quickcheck::{
@@ -13,9 +15,8 @@ use {
     std::fmt::Debug,
 };
 
-
 pub fn maximizing_fuzz_loop<
-    Domain: Clone + Arbitrary + Mutate,
+    Domain: Clone + Arbitrary<ThreadRng> + Mutate<ThreadRng>,
     Codomain,
     Feedback: Clone + Ord + Debug,
 >(
@@ -23,7 +24,8 @@ pub fn maximizing_fuzz_loop<
     fb: fn(Box<dyn FnOnce() -> Codomain + '_>) -> (Codomain, Feedback),
 ) -> Seed<Domain, Feedback> {
     let mut pool: SeedPool<Domain, Feedback> = SeedPool::new();
-    let fuel = 100000;
+    let fuel = 1000;
+    let mut rng = rand::thread_rng();
 
     for i in 1..=fuel {
         if i % 1000 == 0 {
@@ -33,9 +35,9 @@ pub fn maximizing_fuzz_loop<
             println!("====================\n");
         }
         let input = if let Some(seed) = pool.pop() {
-            Domain::mutate(&seed.input)
+            Domain::mutate(&seed.input, &mut rng, (i as f32).log2() as usize)
         } else {
-            Domain::generate()
+            Domain::generate(&mut rng, (i as f32).log2() as usize)
         };
 
         let copy = input.clone();
@@ -45,18 +47,28 @@ pub fn maximizing_fuzz_loop<
             let seed = Seed { input, feedback, energy: 1000 };
             pool.add_seed(seed);
         }
+
+        #[cfg(feature = "profiling")]
+        if std::env::var("SNAPSHOT").is_ok() {
+            crate::profiling::snapshot(format!("iteration_{i}").as_str());
+            crate::profiling::reset();
+        }
     }
 
     pool.best_of_all_time.unwrap().clone()
 }
 
 
-pub fn prop_fuzz_loop<Domain: Clone + Arbitrary + Mutate, Feedback: Clone + Ord + Debug>(
+pub fn prop_fuzz_loop<
+    Domain: Clone + Debug + Arbitrary<ThreadRng> + Mutate<ThreadRng>,
+    Feedback: Clone + Ord + Debug,
+>(
     p: fn(Domain) -> bool,
     fb: fn(Box<dyn FnOnce() -> bool + '_>) -> (bool, Feedback),
-) -> RunResult<Seed<Domain, Feedback>> {
+) -> RunResult {
     let mut pool: SeedPool<Domain, Feedback> = SeedPool::new();
-    let fuel = 100000;
+    let fuel = 1000;
+    let mut rng = rand::thread_rng();
 
     for i in 1..=fuel {
         if i % 1000 == 0 {
@@ -66,9 +78,9 @@ pub fn prop_fuzz_loop<Domain: Clone + Arbitrary + Mutate, Feedback: Clone + Ord 
             println!("====================\n");
         }
         let input = if let Some(seed) = pool.pop() {
-            Domain::mutate(&seed.input)
+            Domain::mutate(&seed.input, &mut rng, (i as f32).log2() as usize)
         } else {
-            Domain::generate()
+            Domain::generate(&mut rng, (i as f32).log2() as usize)
         };
 
         let copy = input.clone();
@@ -78,7 +90,7 @@ pub fn prop_fuzz_loop<Domain: Clone + Arbitrary + Mutate, Feedback: Clone + Ord 
             return RunResult {
                 passed: i,
                 discarded: 0,
-                counterexample: Some(Seed { input, feedback, energy: 1000 }),
+                counterexample: Some(format!("{:?}", input)),
             };
         }
         if pool.is_empty() || feedback > pool.best().clone().feedback {
