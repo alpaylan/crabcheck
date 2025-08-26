@@ -1,11 +1,8 @@
 use {
     bst::Tree,
-    crabcheck::{
-        quickcheck::{
-            Arbitrary,
-            Mutate,
-            quickcheck
-        },
+    crabcheck::quickcheck::{
+        Arbitrary,
+        Mutate,
     },
     rand::Rng,
     spec::{
@@ -21,6 +18,11 @@ use {
     },
     std::i32,
 };
+
+#[cfg(feature = "profiling")]
+use crabcheck::profiling::quickcheck;
+#[cfg(not(feature = "profiling"))]
+use crabcheck::quickcheck::quickcheck;
 
 pub mod bst;
 pub mod spec;

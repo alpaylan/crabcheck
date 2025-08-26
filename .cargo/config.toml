@@ -1,0 +1,11 @@
+[profile.profiling]
+inherits = "dev"
+
+[profile.profiling.build-override]
+rustflags = [
+    "-Zinstrument-coverage",
+    "-C", "link-dead-code",
+    "-C", "codegen-units=1",
+    "-C", "inline-threshold=0",
+    "-C", "llvm-args=-inline-threshold=0",
+]

@@ -55,3 +55,16 @@ fn main() {
     );
 }
 ```
+
+## Profiling
+
+In order to test the profiling, you need to activate the mutation using `marauders` and run the binary with 
+`cargo-llvm-cov`.
+
+
+```bash
+$ marauders set --variant insert_1
+$ cargo llvm-cov run --example bst --features profiling -- insert_post
+$  ./instrumentation.sh # this step might take a couple minutes long
+$ cargo run --release --bin analysis.rs # this step also takes roughly 10-15 seconds
+```

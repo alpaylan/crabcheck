@@ -1,4 +1,4 @@
-use std::fmt::{Debug, Display};
+use std::fmt::Debug;
 
 use rand::{
     Rng,
@@ -22,7 +22,7 @@ impl<R: Rng> Arbitrary<R> for i32 {
 }
 
 impl<R: Rng> Mutate<R> for i32 {
-    fn mutate(&self, rng: &mut R, n: usize) -> i32 {
+    fn mutate(&self, rng: &mut R, _n: usize) -> i32 {
         rng.gen_range(self - 10..self + 10)
     }
 }
@@ -172,7 +172,13 @@ pub fn quickcheck<T: Arbitrary<ThreadRng> + Clone + Debug>(f: fn(T) -> Option<bo
         match f(input.clone()) {
             None => discarded += 1,
             Some(true) => passed += 1,
-            Some(false) => return RunResult { passed, discarded, counterexample: Some(format!("{:?}", input)) },
+            Some(false) => {
+                return RunResult {
+                    passed,
+                    discarded,
+                    counterexample: Some(format!("{:?}", input)),
+                };
+            },
         }
     }
 
