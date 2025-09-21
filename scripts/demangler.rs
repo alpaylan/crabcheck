@@ -1,3 +1,4 @@
+#[cfg(feature = "profiling")]
 use {
     rustc_demangle::demangle,
     serde::{
@@ -10,6 +11,7 @@ use {
     },
 };
 
+#[cfg(feature = "profiling")]
 #[derive(Debug, Deserialize, Serialize)]
 struct CoverageExport {
     data: Vec<ExportData>,
@@ -17,6 +19,7 @@ struct CoverageExport {
     other: serde_json::Value,
 }
 
+#[cfg(feature = "profiling")]
 #[derive(Debug, Deserialize, Serialize)]
 struct ExportData {
     functions: Vec<Function>,
@@ -24,6 +27,7 @@ struct ExportData {
     other: serde_json::Value,
 }
 
+#[cfg(feature = "profiling")]
 #[derive(Debug, Deserialize, Serialize)]
 struct Function {
     name: String,
@@ -31,6 +35,7 @@ struct Function {
     other: serde_json::Value,
 }
 
+#[cfg(feature = "profiling")]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
     if args.len() != 3 {
@@ -55,4 +60,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("✅ Wrote demangled JSON to {}", output_path);
     Ok(())
+}
+
+#[cfg(not(feature = "profiling"))]
+fn main() {
+    eprintln!("This binary requires the 'profiling' feature to be enabled.");
+    std::process::exit(1);
 }
