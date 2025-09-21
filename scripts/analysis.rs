@@ -57,7 +57,7 @@ fn number_to_u32(v: &Value) -> u32 {
     number_to_u64(v) as u32
 }
 
-fn extract_region_counts(json_path: &Path) -> HashMap<RegionKey, u64> {
+fn extract_region_counts(json_path: &Path, module: &str) -> HashMap<RegionKey, u64> {
     let file = match File::open(json_path) {
         Ok(f) => f,
         Err(_) => return HashMap::new(),
@@ -84,6 +84,9 @@ fn extract_region_counts(json_path: &Path) -> HashMap<RegionKey, u64> {
         let Some(name) = func.get("name").and_then(|v| v.as_str()) else {
             continue;
         };
+        if !name.contains(module) {
+            continue;
+        }
         let Some(filenames) = func.get("filenames").and_then(|v| v.as_array()) else {
             continue;
         };
@@ -120,9 +123,9 @@ fn extract_region_counts(json_path: &Path) -> HashMap<RegionKey, u64> {
     regions
 }
 
-fn aggregate(paths: &[PathBuf]) -> HashMap<RegionKey, u64> {
+fn aggregate(paths: &[PathBuf], module: &str) -> HashMap<RegionKey, u64> {
     // Parallel parse, then reduce into a single map
-    paths.par_iter().map(|p| extract_region_counts(p)).reduce(HashMap::new, |mut acc, m| {
+    paths.par_iter().map(|p| extract_region_counts(p, module)).reduce(HashMap::new, |mut acc, m| {
         for (k, v) in m {
             *acc.entry(k).or_insert(0) += v;
         }
@@ -133,11 +136,12 @@ fn aggregate(paths: &[PathBuf]) -> HashMap<RegionKey, u64> {
 fn main() {
     // get `--json-path` argument
     let args: Vec<String> = std::env::args().collect();
-    if args.len() != 2 {
-        eprintln!("Usage: crabcheck-profiling-analysis <coverage_data_path>");
+    if args.len() != 3 {
+        eprintln!("Usage: crabcheck-profiling-analysis <coverage_data_path> <module>");
         std::process::exit(1);
     }
     let coverage_data_path = &args[1];
+    let module = &args[2];
 
     let indices_path = PathBuf::from(format!("{}/indices.json", coverage_data_path));
     let file = File::open(&indices_path).expect("Failed to open indices.json");
@@ -146,8 +150,8 @@ fn main() {
     let positive_paths: Vec<PathBuf> = indices.positives.into_iter().map(snapshot_path).collect();
     let negative_paths: Vec<PathBuf> = indices.negatives.into_iter().map(snapshot_path).collect();
 
-    let pos_cov = aggregate(&positive_paths);
-    let neg_cov = aggregate(&negative_paths);
+    let pos_cov = aggregate(&positive_paths, module);
+    let neg_cov = aggregate(&negative_paths, module);
 
     let pos_len = positive_paths.len().max(1) as f64; // avoid div-by-zero
     let neg_len = negative_paths.len().max(1) as f64;
