@@ -3,6 +3,7 @@ use {
         quickcheck::{
             Arbitrary,
             Mutate,
+            ResultStatus,
             RunResult,
         },
         seedpool::{
@@ -24,7 +25,7 @@ pub fn maximizing_targeting_loop<
 ) -> Seed<Domain, Feedback> {
     let mut pool: SeedPool<Domain, Feedback> = SeedPool::new();
     let fuel = 1000;
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
 
     for i in 1..=fuel {
         if i % 1000 == 0 {
@@ -60,7 +61,7 @@ pub fn prop_targeting_loop<
 ) -> RunResult {
     let mut pool: SeedPool<Domain, Feedback> = SeedPool::new();
     let fuel = 100000;
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
 
     for i in 1..=fuel {
         if i % 1000 == 0 {
@@ -80,9 +81,9 @@ pub fn prop_targeting_loop<
 
         if !result {
             return RunResult {
+                status: ResultStatus::Failed { arguments: vec![format!("{:?}", input)] },
                 passed: i,
                 discarded: 0,
-                counterexample: Some(format!("{:?}", input)),
             };
         }
 
@@ -92,7 +93,7 @@ pub fn prop_targeting_loop<
         }
     }
 
-    RunResult { passed: fuel, discarded: 0, counterexample: None }
+    RunResult { passed: fuel, discarded: 0, status: ResultStatus::Finished }
 }
 
 
@@ -105,7 +106,7 @@ mod tests {
         let result =
             maximizing_targeting_loop(|x: Vec<i32>| x.iter().sum(), |_x: Vec<i32>, y: i32| y);
 
-        let avg: i32 = <Vec<i32>>::generate(&mut rand::thread_rng(), 100).iter().sum();
+        let avg: i32 = <Vec<i32>>::generate(&mut rand::rng(), 100).iter().sum();
 
         assert!(result.feedback > avg);
     }

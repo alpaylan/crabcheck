@@ -3,12 +3,19 @@
 use std::{
     any::Any,
     fmt::Debug,
-    ops::{Deref, RangeBounds, Sub},
+    ops::{
+        Deref,
+        RangeBounds,
+        Sub,
+    },
 };
 
 use rand::{
     Rng,
-    rngs::{self, ThreadRng},
+    rngs::{
+        self,
+        ThreadRng,
+    },
 };
 
 use crate::tracing;
@@ -50,7 +57,7 @@ trait Choose {
 
 impl Choose for usize {
     fn choose(range: std::ops::RangeInclusive<Self>) -> Gen<Self> {
-        Gen { g: Box::new(move |_, rng| rng.gen_range(range.clone())) }
+        Gen { g: Box::new(move |_, rng| rng.random_range(range.clone())) }
     }
 }
 
@@ -64,18 +71,20 @@ impl<T: Arbitrary + Clone + 'static> Arbitrary for Tree<T> {
     fn arbitrary_sized(n: usize) -> Gen<Tree<T>> {
         match n {
             0 => Gen::bind(T::arbitrary(), |t| Gen::ret(Tree::Leaf(t))),
-            _ => Gen::bind(T::arbitrary(), move |t: T| {
-                Gen::bind(Tree::<T>::arbitrary_sized(n - 1), move |left: Tree<T>| {
-                    let t = t.clone();
-                    Gen::bind(Tree::<T>::arbitrary_sized(n - 1), move |right: Tree<T>| {
-                        Gen::ret(Tree::Node(
-                            t.clone(),
-                            Box::new(left.clone()),
-                            Box::new(right.clone()),
-                        ))
+            _ => {
+                Gen::bind(T::arbitrary(), move |t: T| {
+                    Gen::bind(Tree::<T>::arbitrary_sized(n - 1), move |left: Tree<T>| {
+                        let t = t.clone();
+                        Gen::bind(Tree::<T>::arbitrary_sized(n - 1), move |right: Tree<T>| {
+                            Gen::ret(Tree::Node(
+                                t.clone(),
+                                Box::new(left.clone()),
+                                Box::new(right.clone()),
+                            ))
+                        })
                     })
                 })
-            }),
+            },
         }
     }
 }
@@ -263,7 +272,7 @@ fn one_of<T: Traced>(choices: &'static mut Vec<TrGen<T>>) -> TrGen<T> {
 
     TrGen {
         g: Box::new(move |_, rng: &mut rngs::ThreadRng| {
-            let index = rng.gen_range(0..choices.len());
+            let index = rng.random_range(0..choices.len());
             let choice = &mut choices[index];
             let (value, mut traces) = (choice.g)(0, rng);
             // traces.0.push(trace.clone());
@@ -290,7 +299,7 @@ fn freq<T: Traced>(mut choices: Vec<(u32, TrGen<T>)>) -> TrGen<T> {
                 .iter_mut()
                 .find(|(weight, _)| {
                     cumulative_weight += weight;
-                    cumulative_weight > rng.gen_range(0..total_weight)
+                    cumulative_weight > rng.random_range(0..total_weight)
                 })
                 .expect("No choice found in frequency distribution");
             let (value, mut traces) = (choice.1.g)(0, rng);
@@ -310,7 +319,7 @@ impl TrChoose for TrUsize {
                     &rng,
                 );
 
-                let value = rng.gen_range(lo.n..=hi.n);
+                let value = rng.random_range(lo.n..=hi.n);
                 (TrUsize { id: Some(trace.id()), n: value }, Traces(vec![trace.clone()]))
             }),
         }
@@ -345,34 +354,38 @@ impl<T: TrArbitrary> TrArbitrary for TrTree<T> {
     fn arbitrary_sized(n: TrUsize) -> TrGen<TrTree<T>> {
         match n.n {
             0 => TrGen::bind(T::arbitrary(), |t| TrGen::ret(TrTree::TrLeaf(Some(Id::new()), t))),
-            n_ => freq(vec![
-                (
-                    1,
-                    TrGen::bind(T::arbitrary(), |t| TrGen::ret(TrTree::TrLeaf(Some(Id::new()), t))),
-                ),
-                (
-                    n_ as u32,
-                    TrGen::bind(T::arbitrary(), move |t: T| {
-                        TrGen::bind(
-                            TrTree::<T>::arbitrary_sized(n.decr()),
-                            move |left: TrTree<T>| {
-                                let t = t.clone();
-                                TrGen::bind(
-                                    TrTree::<T>::arbitrary_sized(n.decr()),
-                                    move |right: TrTree<T>| {
-                                        TrGen::ret(TrTree::TrNode(
-                                            Some(Id::new()),
-                                            t.clone(),
-                                            Box::new(left.clone()),
-                                            Box::new(right.clone()),
-                                        ))
-                                    },
-                                )
-                            },
-                        )
-                    }),
-                ),
-            ]),
+            n_ => {
+                freq(vec![
+                    (
+                        1,
+                        TrGen::bind(T::arbitrary(), |t| {
+                            TrGen::ret(TrTree::TrLeaf(Some(Id::new()), t))
+                        }),
+                    ),
+                    (
+                        n_ as u32,
+                        TrGen::bind(T::arbitrary(), move |t: T| {
+                            TrGen::bind(
+                                TrTree::<T>::arbitrary_sized(n.decr()),
+                                move |left: TrTree<T>| {
+                                    let t = t.clone();
+                                    TrGen::bind(
+                                        TrTree::<T>::arbitrary_sized(n.decr()),
+                                        move |right: TrTree<T>| {
+                                            TrGen::ret(TrTree::TrNode(
+                                                Some(Id::new()),
+                                                t.clone(),
+                                                Box::new(left.clone()),
+                                                Box::new(right.clone()),
+                                            ))
+                                        },
+                                    )
+                                },
+                            )
+                        }),
+                    ),
+                ])
+            },
         }
     }
 }
@@ -396,41 +409,45 @@ mod tests {
             traces
                 .0
                 .iter()
-                .map(|t| match t {
-                    // Trace::Bind(id, value) => format!("{:?} <- {:?}", id, value),
-                    Trace::Ret(id, rng, value) =>
-                        format!("{:?} <- {:?} (rng: {:?})", id, value, rng),
-                    Trace::Choose(id, rng, lo, hi) =>
-                        format!("{:?} <- choose({:?}, {:?}) (rng: {:?}", id, lo, hi, rng),
-                    // Trace::OneOf(id, vals) => format!(
-                    //     "{:?} <- one_of({})",
-                    //     id,
-                    //     vals.iter()
-                    //         .map(|v| match v {
-                    //             Val::Id(id) => format!("{:?}", id),
-                    //             Val::Val(val) => val.clone(),
-                    //         })
-                    //         .collect::<Vec<_>>()
-                    //         .join(", ")
-                    // ),
-                    // Trace::Freq(id, choices) => format!(
-                    //     "{:?} <- freq({})",
-                    //     id,
-                    //     choices
-                    //         .iter()
-                    //         .map(|(weight, val)| {
-                    //             format!(
-                    //                 "{}: {:?}",
-                    //                 weight,
-                    //                 match val {
-                    //                     Val::Id(id) => format!("{:?}", id),
-                    //                     Val::Val(val) => val.clone(),
-                    //                 }
-                    //             )
-                    //         })
-                    //         .collect::<Vec<_>>()
-                    //         .join(", ")
-                    // ),
+                .map(|t| {
+                    match t {
+                        // Trace::Bind(id, value) => format!("{:?} <- {:?}", id, value),
+                        Trace::Ret(id, rng, value) => {
+                            format!("{:?} <- {:?} (rng: {:?})", id, value, rng)
+                        },
+                        Trace::Choose(id, rng, lo, hi) => {
+                            format!("{:?} <- choose({:?}, {:?}) (rng: {:?}", id, lo, hi, rng)
+                        },
+                        // Trace::OneOf(id, vals) => format!(
+                        //     "{:?} <- one_of({})",
+                        //     id,
+                        //     vals.iter()
+                        //         .map(|v| match v {
+                        //             Val::Id(id) => format!("{:?}", id),
+                        //             Val::Val(val) => val.clone(),
+                        //         })
+                        //         .collect::<Vec<_>>()
+                        //         .join(", ")
+                        // ),
+                        // Trace::Freq(id, choices) => format!(
+                        //     "{:?} <- freq({})",
+                        //     id,
+                        //     choices
+                        //         .iter()
+                        //         .map(|(weight, val)| {
+                        //             format!(
+                        //                 "{}: {:?}",
+                        //                 weight,
+                        //                 match val {
+                        //                     Val::Id(id) => format!("{:?}", id),
+                        //                     Val::Val(val) => val.clone(),
+                        //                 }
+                        //             )
+                        //         })
+                        //         .collect::<Vec<_>>()
+                        //         .join(", ")
+                        // ),
+                    }
                 })
                 .collect::<Vec<_>>()
         );

@@ -1,4 +1,7 @@
-use crabcheck::quickcheck::quickcheck;
+use crabcheck::quickcheck::{
+    ResultStatus,
+    quickcheck,
+};
 
 fn correct_insertion_sort(array: &mut [i32]) {
     for i in 1..array.len() {
@@ -29,16 +32,11 @@ fn main() {
         correct_insertion_sort(&mut input);
         Some(is_sorted(&input))
     });
-    assert!(should_work.counterexample.is_none());
+    assert!(matches!(should_work.status, ResultStatus::Finished));
 
     let should_fail = quickcheck(|mut input: Vec<i32>| {
         bugged_insertion_sort(&mut input);
         Some(is_sorted(&mut input))
     });
-    assert!(should_fail.counterexample.is_some());
-
-    println!(
-        "Counterexample that doesn't work on buggy implementation: {:?}",
-        should_fail.counterexample.unwrap(),
-    );
+    assert!(matches!(should_fail.status, ResultStatus::Failed { .. }));
 }

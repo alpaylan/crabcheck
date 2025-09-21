@@ -2,6 +2,7 @@ use crabcheck::quickcheck::Implies;
 
 use crate::bst::*;
 
+#[allow(dead_code)]
 fn tree_eq(t1: &Tree, t2: &Tree) -> bool {
     to_list(t1) == to_list(t2)
 }
@@ -71,6 +72,7 @@ fn l_insert((k, v): (i32, i32), xs: &[(i32, i32)]) -> Vec<(i32, i32)> {
     result
 }
 
+#[allow(dead_code)]
 fn sorted(xs: &[(i32, i32)]) -> bool {
     xs.windows(2).all(|w| w[0].0 < w[1].0)
 }

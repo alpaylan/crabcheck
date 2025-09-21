@@ -11,6 +11,7 @@ use rand::rngs::ThreadRng;
 
 use crate::quickcheck::{
     Arbitrary,
+    ResultStatus,
     RunResult,
 };
 
@@ -25,7 +26,7 @@ pub fn par_quickcheck<T: Arbitrary<ThreadRng> + Sync + Send + Debug + Clone + 's
         let done = done.clone();
         let result = result.clone();
         let thread = std::thread::spawn(move || {
-            let mut rng = rand::thread_rng();
+            let mut rng = rand::rng();
             for i in 0..100 {
                 if done.load(std::sync::atomic::Ordering::Relaxed) {
                     return;
@@ -37,9 +38,11 @@ pub fn par_quickcheck<T: Arbitrary<ThreadRng> + Sync + Send + Debug + Clone + 's
                     false => {
                         let mut result = result.lock().unwrap();
                         *result = Some(RunResult {
+                            status: ResultStatus::Failed {
+                                arguments: vec![format!("{:?}", input)],
+                            },
                             passed: i,
                             discarded: 0,
-                            counterexample: Some(format!("{:?}", input)),
                         });
                         done.store(true, std::sync::atomic::Ordering::Relaxed);
                         return;
@@ -57,12 +60,14 @@ pub fn par_quickcheck<T: Arbitrary<ThreadRng> + Sync + Send + Debug + Clone + 's
     let result = result.lock().unwrap();
     match &*result {
         Some(result) => result.clone(),
-        None => RunResult { passed: 100, discarded: 0, counterexample: None },
+        None => RunResult { passed: 100, discarded: 0, status: ResultStatus::Finished },
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::quickcheck::ResultStatus;
+
     use super::*;
 
     #[test]
@@ -75,7 +80,7 @@ mod tests {
         });
         assert_eq!(result.passed, 100);
         assert_eq!(result.discarded, 0);
-        assert!(result.counterexample.is_none());
+        assert!(result.status == ResultStatus::Finished);
     }
 
     #[test]
@@ -86,7 +91,7 @@ mod tests {
             copy == *x
         });
         assert!(result.passed < 100);
-        assert!(result.counterexample.is_some());
+        assert!(matches!(result.status, ResultStatus::Failed { .. }));
     }
 
     #[test]
@@ -99,6 +104,6 @@ mod tests {
         });
         assert_eq!(result.passed, 100);
         assert_eq!(result.discarded, 0);
-        assert!(result.counterexample.is_none());
+        assert!(result.status == ResultStatus::Finished);
     }
 }

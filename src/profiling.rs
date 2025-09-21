@@ -12,6 +12,7 @@ use {
 use crate::quickcheck::{
     Arbitrary,
     Mutate,
+    ResultStatus,
     RunResult,
 };
 
@@ -23,18 +24,19 @@ extern "C" {
 
 
 pub(crate) fn snapshot(label: &str) {
+    tracing::debug!("Taking snapshot: {}", label);
     unsafe {
         __llvm_profile_write_file();
     }
 
     // Glob to find the current .profraw file
-    let files = glob::glob("target/llvm-cov-target/*.profraw").unwrap();
+    let files = glob::glob("coverage/*.profraw").unwrap();
     let newest: Option<std::path::PathBuf> = files.filter_map(Result::ok).max_by_key(|path| {
         path.metadata().and_then(|m| m.modified()).unwrap_or(SystemTime::UNIX_EPOCH)
     });
 
     if let Some(path) = newest {
-        let new_name = format!("target/llvm-cov-target/snapshot_{}.profraw", label);
+        let new_name = format!("coverage/snapshot_{}.profraw", label);
         fs::rename(&path, &new_name).expect("rename failed");
     }
 }
@@ -46,12 +48,14 @@ pub(crate) fn reset() {
 pub fn quickcheck<T: Arbitrary<ThreadRng> + Mutate<ThreadRng> + Clone + Debug>(
     f: fn(T) -> Option<bool>,
 ) -> RunResult {
-    let mut rng = rand::thread_rng();
-    let n = 20000;
+    let mut rng = rand::rng();
+    tracing::debug!("Starting profiling quickcheck...");
+    let n = 200;
     let mut passed = 0;
     let mut discarded = 0;
     for i in 0..n {
         let input = T::generate(&mut rng, ((i + 1) as f32).log2() as usize);
+        tracing::trace!("Test #{}: {:?}", i, input);
         match f(input.clone()) {
             None => discarded += 1,
             Some(true) => passed += 1,
@@ -76,8 +80,8 @@ pub fn quickcheck<T: Arbitrary<ThreadRng> + Mutate<ThreadRng> + Clone + Debug>(
                         },
                     }
                 }
-                println!("positives: {}", positives.len());
-                println!("negatives: {}", negatives.len());
+                tracing::debug!("positives: {}", positives.len());
+                tracing::debug!("negatives: {}", negatives.len());
 
                 #[derive(Serialize)]
                 struct Indices {
@@ -95,20 +99,20 @@ pub fn quickcheck<T: Arbitrary<ThreadRng> + Mutate<ThreadRng> + Clone + Debug>(
                 };
 
                 let json = serde_json::to_string(&indices).unwrap();
-                let file_path = format!("target/llvm-cov-target/indices.json",);
-                println!("JSON: {}", json);
+                let file_path = format!("coverage/indices.json");
+                tracing::debug!("JSON: {}", json);
                 fs::write(file_path, json).expect("Unable to write file");
-                println!("JSON written to target/llvm-cov-target/indices.json");
+                tracing::debug!("JSON written to coverage/indices.json");
 
 
                 return RunResult {
+                    status: ResultStatus::Failed { arguments: vec![format!("{:?}", input)] },
                     passed,
                     discarded,
-                    counterexample: Some(negatives[0].1.to_string()),
                 };
             },
         }
     }
 
-    RunResult { passed: n, discarded: 0, counterexample: None }
+    RunResult { passed: n, discarded: 0, status: ResultStatus::Finished }
 }

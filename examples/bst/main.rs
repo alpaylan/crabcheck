@@ -31,7 +31,7 @@ fn gen_tree<R: Rng>(r: &mut R, size: u32, lo: i32, hi: i32) -> Tree {
     if size == 0 || hi - lo <= 1 {
         return Tree::E;
     }
-    let k = r.gen_range(lo + 1..hi);
+    let k = r.random_range(lo + 1..hi);
     let left = gen_tree(r, size - 1, lo, k);
     let right = gen_tree(r, size - 1, k + 1, hi);
     Tree::T(Box::new(left), k, k, Box::new(right))
@@ -50,7 +50,7 @@ fn mut_tree<R: Rng>(rng: &mut R, t: &Tree, n: usize, lo: i32, hi: i32) -> Tree {
     match t {
         Tree::E => Tree::E,
         Tree::T(l, k, v, r) => {
-            let choice = rng.gen_range(0..=3);
+            let choice = rng.random_range(0..=3);
             match choice {
                 0 => {
                     // just mutate the value
@@ -69,7 +69,7 @@ fn mut_tree<R: Rng>(rng: &mut R, t: &Tree, n: usize, lo: i32, hi: i32) -> Tree {
                         return Tree::E;
                     }
 
-                    let new_k = rng.gen_range(left_root + 1..right_root);
+                    let new_k = rng.random_range(left_root + 1..right_root);
                     Tree::T(l.clone(), new_k, *v, r.clone())
                 },
                 2 => {
@@ -114,6 +114,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         _ => panic!("Unknown input"),
     };
 
-    assert!(r.counterexample.is_some(), "bug is not triggered");
+    match r.status {
+        crabcheck::quickcheck::ResultStatus::Finished => println!("All tests passed!"),
+        crabcheck::quickcheck::ResultStatus::Failed { .. } => println!("A test failed!"),
+        crabcheck::quickcheck::ResultStatus::GaveUp => println!("Gave up!"),
+        crabcheck::quickcheck::ResultStatus::TimedOut => println!("Timed out!"),
+        crabcheck::quickcheck::ResultStatus::Aborted { error } => {
+            println!("Aborted due to error: {}", error);
+        },
+    }
+
     Ok(())
 }

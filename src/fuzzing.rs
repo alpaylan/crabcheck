@@ -1,5 +1,7 @@
 use rand::rngs::ThreadRng;
 
+use crate::quickcheck::ResultStatus;
+
 use {
     crate::{
         quickcheck::{
@@ -25,7 +27,7 @@ pub fn maximizing_fuzz_loop<
 ) -> Seed<Domain, Feedback> {
     let mut pool: SeedPool<Domain, Feedback> = SeedPool::new();
     let fuel = 1000;
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
 
     for i in 1..=fuel {
         if i % 1000 == 0 {
@@ -68,7 +70,7 @@ pub fn prop_fuzz_loop<
 ) -> RunResult {
     let mut pool: SeedPool<Domain, Feedback> = SeedPool::new();
     let fuel = 1000;
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
 
     for i in 1..=fuel {
         if i % 1000 == 0 {
@@ -90,7 +92,7 @@ pub fn prop_fuzz_loop<
             return RunResult {
                 passed: i,
                 discarded: 0,
-                counterexample: Some(format!("{:?}", input)),
+                status: ResultStatus::Failed { arguments: vec![format!("{:?}", input)] },
             };
         }
         if pool.is_empty() || feedback > pool.best().clone().feedback {
@@ -99,5 +101,5 @@ pub fn prop_fuzz_loop<
         }
     }
 
-    RunResult { passed: fuel, discarded: 0, counterexample: None }
+    RunResult { passed: fuel, discarded: 0, status: ResultStatus::Finished }
 }

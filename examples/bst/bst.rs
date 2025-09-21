@@ -24,15 +24,15 @@ pub fn insert(k: i32, v: i32, t: Tree) -> Tree {
             }
 */
             /*|| insert_1 */
-            T(Box::new(E), k, v, Box::new(E))
-            /*|| insert_2 */
             /*|
+            T(Box::new(E), k, v, Box::new(E))
+            */
+            /*|| insert_2 */
             if k < k2 {
                 T(Box::new(insert(k, v, *l)), k2, v2, r)
             } else {
                 T(l, k2, v, r)
             }
-            */
             /*|| insert_3 */
             /*|
             if k < k2 {
