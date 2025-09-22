@@ -179,14 +179,7 @@ fn main() {
         let delta = neg_avg - pos_avg;
 
         if print_json {
-            printed_regions.push((
-                region.clone(),
-                pos_avg,
-                pos_cov.len(),
-                neg_avg,
-                neg_cov.len(),
-                delta,
-            ));
+            printed_regions.push((region.clone(), pos_avg, neg_avg, delta));
         }
         if delta > 0.0 {
             let label = format!(
@@ -208,7 +201,7 @@ fn main() {
     if print_json {
         let printed_regions: Vec<serde_json::Value> = printed_regions
             .into_iter()
-            .map(|(region, pos, pos_samples, neg, neg_samples, delta)| {
+            .map(|(region, pos, neg, delta)| {
                 serde_json::json!({
                     "file": region.fname,
                     "function": region.func,
@@ -217,15 +210,13 @@ fn main() {
                     "end_line": region.el,
                     "end_col": region.ec,
                     "positive_avg": pos,
-                    "positive_samples": pos_samples,
                     "negative_avg": neg,
-                    "negative_samples": neg_samples,
                     "delta": delta,
                 })
             })
             .collect();
 
-        let json = serde_json::json!({"regions": printed_regions});
+        let json = serde_json::json!({"regions": printed_regions, "positive_samples": pos_cov.len(), "negative_samples": neg_cov.len()});
         let json = serde_json::to_string(&json).expect("Failed to serialize JSON");
         println!("{}", json);
     }
