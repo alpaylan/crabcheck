@@ -35,7 +35,19 @@ impl<R: Rng> Arbitrary<R> for usize {
 
 impl<R: Rng> Mutate<R> for usize {
     fn mutate(&self, rng: &mut R, _n: usize) -> usize {
-        rng.random_range((*self - 10)..=(*self + 10))
+        rng.random_range(self.saturating_sub(10)..=self.saturating_add(10))
+    }
+}
+
+impl<R: Rng> Arbitrary<R> for bool {
+    fn generate(rng: &mut R, _n: usize) -> bool {
+        rng.random_bool(0.5)
+    }
+}
+
+impl<R: Rng> Mutate<R> for bool {
+    fn mutate(&self, rng: &mut R, _n: usize) -> bool {
+        if rng.random_bool(0.1) { !*self } else { *self }
     }
 }
 
