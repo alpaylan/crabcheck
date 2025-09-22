@@ -1,6 +1,9 @@
 use {
     rayon::prelude::*,
-    serde::Deserialize,
+    serde::{
+        Deserialize,
+        Serialize,
+    },
     serde_json::Value,
     std::{
         collections::{
@@ -16,7 +19,7 @@ use {
     },
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
 struct RegionKey {
     fname: String,
     func: String,
@@ -136,12 +139,15 @@ fn aggregate(paths: &[PathBuf], module: &str) -> HashMap<RegionKey, u64> {
 fn main() {
     // get `--json-path` argument
     let args: Vec<String> = std::env::args().collect();
-    if args.len() != 3 {
-        eprintln!("Usage: crabcheck-profiling-analysis <coverage_data_path> <module>");
+    if args.len() < 3 {
+        eprintln!(
+            "Usage: crabcheck-profiling-analysis <coverage_data_path> <module> [--print-json]"
+        );
         std::process::exit(1);
     }
     let coverage_data_path = &args[1];
     let module = &args[2];
+    let print_json = args.get(3) == Some(&"--print-json".into());
 
     let indices_path = PathBuf::from(format!("{}/indices.json", coverage_data_path));
     let file = File::open(&indices_path).expect("Failed to open indices.json");
@@ -161,14 +167,20 @@ fn main() {
     all_regions.extend(pos_cov.keys().cloned());
     all_regions.extend(neg_cov.keys().cloned());
 
+
     println!("{:60} {:>8} {:>8} {:>8}", "File:Line", "Pos", "Neg", "Δ");
     println!("{}", "-".repeat(84));
+
+    let mut printed_regions = vec![];
 
     for region in all_regions {
         let pos_avg = pos_cov.get(&region).map(|&v| v as f64 / pos_len).unwrap_or(0.0);
         let neg_avg = neg_cov.get(&region).map(|&v| v as f64 / neg_len).unwrap_or(0.0);
         let delta = neg_avg - pos_avg;
 
+        if print_json {
+            printed_regions.push((region.clone(), pos_avg, neg_avg, delta));
+        }
         if delta > 0.0 {
             let label = format!(
                 "({}){}:{}:{} -> {}:{}",
@@ -184,5 +196,28 @@ fn main() {
             );
             println!("{:60} {:>8.2} {:>8.2} {:+>8.2}", label, pos_avg, neg_avg, delta);
         }
+    }
+
+    if print_json {
+        let printed_regions: Vec<serde_json::Value> = printed_regions
+            .into_iter()
+            .map(|(region, pos, neg, delta)| {
+                serde_json::json!({
+                    "file": region.fname,
+                    "function": region.func,
+                    "start_line": region.sl,
+                    "start_col": region.sc,
+                    "end_line": region.el,
+                    "end_col": region.ec,
+                    "positive_avg": pos,
+                    "negative_avg": neg,
+                    "delta": delta,
+                })
+            })
+            .collect();
+
+        let json = serde_json::json!({"regions": printed_regions});
+        let json = serde_json::to_string(&json).expect("Failed to serialize JSON");
+        println!("{}", json);
     }
 }

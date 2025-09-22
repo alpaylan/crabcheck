@@ -50,7 +50,7 @@ pub fn quickcheck<T: Arbitrary<ThreadRng> + Mutate<ThreadRng> + Clone + Debug>(
 ) -> RunResult {
     let mut rng = rand::rng();
     tracing::debug!("Starting profiling quickcheck...");
-    let n = 200;
+    let n = 20_000;
     let mut passed = 0;
     let mut discarded = 0;
     for i in 0..n {

@@ -27,19 +27,30 @@ impl<R: Rng> Mutate<R> for i32 {
     }
 }
 
+impl<R: Rng> Arbitrary<R> for usize {
+    fn generate(rng: &mut R, n: usize) -> usize {
+        rng.random_range(0..=n)
+    }
+}
 
-impl<R: Rng> Arbitrary<R> for Vec<i32> {
-    fn generate(rng: &mut R, n: usize) -> Vec<i32> {
+impl<R: Rng> Mutate<R> for usize {
+    fn mutate(&self, rng: &mut R, _n: usize) -> usize {
+        rng.random_range((*self - 10)..=(*self + 10))
+    }
+}
+
+impl<R: Rng, T: Arbitrary<R>> Arbitrary<R> for Vec<T> {
+    fn generate(rng: &mut R, n: usize) -> Vec<T> {
         let mut list = Vec::with_capacity(n);
         for _ in 0..n {
-            list.push(i32::generate(rng, n));
+            list.push(T::generate(rng, n));
         }
         list
     }
 }
 
-impl<R: Rng> Mutate<R> for Vec<i32> {
-    fn mutate(&self, rng: &mut R, n: usize) -> Vec<i32> {
+impl<R: Rng, T: Mutate<R> + Clone> Mutate<R> for Vec<T> {
+    fn mutate(&self, rng: &mut R, n: usize) -> Vec<T> {
         let mut copy = self.clone();
 
         // Pick a portion of the list and mutate it
@@ -47,7 +58,7 @@ impl<R: Rng> Mutate<R> for Vec<i32> {
         let b = rng.random_range(a..=self.len());
 
         for value in copy[a..b].iter_mut() {
-            *value = i32::generate(rng, n);
+            *value = T::mutate(value, rng, n);
         }
 
         copy
@@ -179,7 +190,6 @@ pub struct RunResult {
     pub discarded: u64,
 }
 
-
 pub trait Implies<T> {
     fn implies(self, other: T) -> Option<bool>;
 }
@@ -216,11 +226,12 @@ impl Implies<Option<bool>> for Option<bool> {
 
 pub fn quickcheck<T: Arbitrary<ThreadRng> + Clone + Debug>(f: fn(T) -> Option<bool>) -> RunResult {
     let mut rng = rand::rng();
-    let n = 100;
+    let n = 20_000;
     let mut passed = 0;
     let mut discarded = 0;
     for i in 0..n {
         let input = T::generate(&mut rng, ((i + 1) as f32).log2() as usize);
+        tracing::trace!("test #{}: {:?}", i + 1, input);
         match f(input.clone()) {
             None => discarded += 1,
             Some(true) => passed += 1,
