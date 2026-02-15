@@ -136,6 +136,68 @@ fn aggregate(paths: &[PathBuf], module: &str) -> HashMap<RegionKey, u64> {
     })
 }
 
+/// Counts how many snapshots have count > 0 for each region (binary hit detection).
+fn aggregate_hits(paths: &[PathBuf], module: &str) -> HashMap<RegionKey, u64> {
+    paths.par_iter().map(|p| {
+        extract_region_counts(p, module)
+            .into_iter()
+            .filter(|(_, v)| *v > 0)
+            .map(|(k, _)| (k, 1u64))
+            .collect::<HashMap<_, _>>()
+    }).reduce(HashMap::new, |mut acc, m| {
+        for (k, v) in m {
+            *acc.entry(k).or_insert(0) += v;
+        }
+        acc
+    })
+}
+
+#[derive(Debug, Serialize)]
+struct Suspiciousness {
+    tarantula: f64,
+    ochiai: f64,
+    dstar: f64,
+    jaccard: f64,
+    op2: f64,
+}
+
+impl Suspiciousness {
+    fn compute(ef: u64, ep: u64, nf: u64, np: u64) -> Self {
+        let ef = ef as f64;
+        let ep = ep as f64;
+        let nf = nf as f64;
+        let _np = np as f64;
+        let f = ef + nf;
+        let p = ep + _np;
+
+        let tarantula = {
+            let ef_over_f = if f > 0.0 { ef / f } else { 0.0 };
+            let ep_over_p = if p > 0.0 { ep / p } else { 0.0 };
+            let denom = ef_over_f + ep_over_p;
+            if denom > 0.0 { ef_over_f / denom } else { 0.0 }
+        };
+
+        let ochiai = {
+            let denom = (f * (ef + ep)).sqrt();
+            if denom > 0.0 { ef / denom } else { 0.0 }
+        };
+
+        let dstar = {
+            let denom = ep + nf;
+            if denom > 0.0 { (ef * ef) / denom } else if ef > 0.0 { f64::MAX } else { 0.0 }
+        };
+
+        let jaccard = {
+            let denom = ef + nf + ep;
+            if denom > 0.0 { ef / denom } else { 0.0 }
+        };
+
+        let op2 = ef - ep / (p + 1.0);
+
+        Suspiciousness { tarantula, ochiai, dstar, jaccard, op2 }
+    }
+}
+
 fn main() {
     // get `--json-path` argument
     let args: Vec<String> = std::env::args().collect();
@@ -153,14 +215,20 @@ fn main() {
     let file = File::open(&indices_path).expect("Failed to open indices.json");
     let indices: Indices =
         serde_json::from_reader(BufReader::new(file)).expect("Failed to parse indices.json");
+    let positive_samples = indices.positives.len();
     let positive_paths: Vec<PathBuf> = indices.positives.into_iter().map(snapshot_path).collect();
+    let negative_samples = indices.negatives.len();
     let negative_paths: Vec<PathBuf> = indices.negatives.into_iter().map(snapshot_path).collect();
 
     let pos_cov = aggregate(&positive_paths, module);
     let neg_cov = aggregate(&negative_paths, module);
+    let pos_hits = aggregate_hits(&positive_paths, module);
+    let neg_hits = aggregate_hits(&negative_paths, module);
 
     let pos_len = positive_paths.len().max(1) as f64; // avoid div-by-zero
     let neg_len = negative_paths.len().max(1) as f64;
+    let total_failing = negative_paths.len() as u64;
+    let total_passing = positive_paths.len() as u64;
 
     // Union of all regions, sorted for stable output
     let mut all_regions: BTreeSet<RegionKey> = BTreeSet::new();
@@ -168,8 +236,8 @@ fn main() {
     all_regions.extend(neg_cov.keys().cloned());
 
 
-    println!("{:60} {:>8} {:>8} {:>8}", "File:Line", "Pos", "Neg", "Δ");
-    println!("{}", "-".repeat(84));
+    println!("{:60} {:>8} {:>8} {:>8} {:>8}", "File:Line", "Pos", "Neg", "Δ", "Ochiai");
+    println!("{}", "-".repeat(93));
 
     let mut printed_regions = vec![];
 
@@ -178,10 +246,15 @@ fn main() {
         let neg_avg = neg_cov.get(&region).map(|&v| v as f64 / neg_len).unwrap_or(0.0);
         let delta = neg_avg - pos_avg;
 
+        let ef = *neg_hits.get(&region).unwrap_or(&0);
+        let ep = *pos_hits.get(&region).unwrap_or(&0);
+        let nf = total_failing.saturating_sub(ef);
+        let np = total_passing.saturating_sub(ep);
+        let susp = Suspiciousness::compute(ef, ep, nf, np);
+
         if print_json {
-            printed_regions.push((region.clone(), pos_avg, neg_avg, delta));
-        }
-        if delta > 0.0 {
+            printed_regions.push((region.clone(), pos_avg, neg_avg, delta, ef, ep, nf, np, susp));
+        } else if delta > 0.0 {
             let label = format!(
                 "({}){}:{}:{} -> {}:{}",
                 region.func,
@@ -194,14 +267,14 @@ fn main() {
                 region.el,
                 region.ec
             );
-            println!("{:60} {:>8.2} {:>8.2} {:+>8.2}", label, pos_avg, neg_avg, delta);
+            println!("{:60} {:>8.2} {:>8.2} {:+>8.2} {:>8.4}", label, pos_avg, neg_avg, delta, susp.ochiai);
         }
     }
 
     if print_json {
         let printed_regions: Vec<serde_json::Value> = printed_regions
             .into_iter()
-            .map(|(region, pos, neg, delta)| {
+            .map(|(region, pos, neg, delta, ef, ep, nf, np, susp)| {
                 serde_json::json!({
                     "file": region.fname,
                     "function": region.func,
@@ -212,11 +285,22 @@ fn main() {
                     "positive_avg": pos,
                     "negative_avg": neg,
                     "delta": delta,
+                    "ef": ef,
+                    "ep": ep,
+                    "nf": nf,
+                    "np": np,
+                    "suspiciousness": {
+                        "tarantula": susp.tarantula,
+                        "ochiai": susp.ochiai,
+                        "dstar": susp.dstar,
+                        "jaccard": susp.jaccard,
+                        "op2": susp.op2,
+                    },
                 })
             })
             .collect();
 
-        let json = serde_json::json!({"regions": printed_regions, "positive_samples": pos_cov.len(), "negative_samples": neg_cov.len()});
+        let json = serde_json::json!({"regions": printed_regions, "positive_samples": positive_samples, "negative_samples": negative_samples});
         let json = serde_json::to_string(&json).expect("Failed to serialize JSON");
         println!("{}", json);
     }

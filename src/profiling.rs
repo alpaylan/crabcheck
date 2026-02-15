@@ -71,7 +71,7 @@ pub fn quickcheck<T: Arbitrary<ThreadRng> + Mutate<ThreadRng> + Clone + Debug>(
                     let result = f(input.clone());
                     crate::profiling::snapshot(format!("iteration_{i}").as_str());
                     match result {
-                        None => panic!("invalid mutation!"),
+                        None => discarded += 1,
                         Some(true) => {
                             positives.push((i, format!("{:?}", input)));
                         },
@@ -100,7 +100,7 @@ pub fn quickcheck<T: Arbitrary<ThreadRng> + Mutate<ThreadRng> + Clone + Debug>(
 
                 let json = serde_json::to_string(&indices).unwrap();
                 let file_path = format!("coverage/indices.json");
-                tracing::debug!("JSON: {}", json);
+                tracing::debug!("JSON:\n{}\n", json);
                 fs::write(file_path, json).expect("Unable to write file");
                 tracing::debug!("JSON written to coverage/indices.json");
 

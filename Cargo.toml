@@ -39,3 +39,7 @@ path = "scripts/analysis.rs"
 [[bin]]
 name = "crabcheck-profiling-demangler"
 path = "scripts/demangler.rs"
+
+[[bin]]
+name = "profraw-reader"
+path = "scripts/profraw.rs"
