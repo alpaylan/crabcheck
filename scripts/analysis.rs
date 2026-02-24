@@ -138,18 +138,21 @@ fn aggregate(paths: &[PathBuf], module: &str) -> HashMap<RegionKey, u64> {
 
 /// Counts how many snapshots have count > 0 for each region (binary hit detection).
 fn aggregate_hits(paths: &[PathBuf], module: &str) -> HashMap<RegionKey, u64> {
-    paths.par_iter().map(|p| {
-        extract_region_counts(p, module)
-            .into_iter()
-            .filter(|(_, v)| *v > 0)
-            .map(|(k, _)| (k, 1u64))
-            .collect::<HashMap<_, _>>()
-    }).reduce(HashMap::new, |mut acc, m| {
-        for (k, v) in m {
-            *acc.entry(k).or_insert(0) += v;
-        }
-        acc
-    })
+    paths
+        .par_iter()
+        .map(|p| {
+            extract_region_counts(p, module)
+                .into_iter()
+                .filter(|(_, v)| *v > 0)
+                .map(|(k, _)| (k, 1u64))
+                .collect::<HashMap<_, _>>()
+        })
+        .reduce(HashMap::new, |mut acc, m| {
+            for (k, v) in m {
+                *acc.entry(k).or_insert(0) += v;
+            }
+            acc
+        })
 }
 
 #[derive(Debug, Serialize)]
@@ -184,7 +187,13 @@ impl Suspiciousness {
 
         let dstar = {
             let denom = ep + nf;
-            if denom > 0.0 { (ef * ef) / denom } else if ef > 0.0 { f64::MAX } else { 0.0 }
+            if denom > 0.0 {
+                (ef * ef) / denom
+            } else if ef > 0.0 {
+                f64::MAX
+            } else {
+                0.0
+            }
         };
 
         let jaccard = {
@@ -267,7 +276,10 @@ fn main() {
                 region.el,
                 region.ec
             );
-            println!("{:60} {:>8.2} {:>8.2} {:+>8.2} {:>8.4}", label, pos_avg, neg_avg, delta, susp.ochiai);
+            println!(
+                "{:60} {:>8.2} {:>8.2} {:+>8.2} {:>8.4}",
+                label, pos_avg, neg_avg, delta, susp.ochiai
+            );
         }
     }
 

@@ -260,6 +260,107 @@ pub fn quickcheck<T: Arbitrary<ThreadRng> + Clone + Debug>(f: fn(T) -> Option<bo
     RunResult { passed, discarded, status: ResultStatus::Finished }
 }
 
+#[cfg(feature = "tracing")]
+#[derive(Clone, Copy, Debug)]
+pub struct TracedTreeQuickcheckConfig {
+    pub tests: u64,
+    pub max_size: usize,
+    pub max_depth: usize,
+}
+
+#[cfg(feature = "tracing")]
+impl Default for TracedTreeQuickcheckConfig {
+    fn default() -> Self {
+        Self { tests: 20_000, max_size: 100, max_depth: 6 }
+    }
+}
+
+#[cfg(feature = "tracing")]
+pub fn quickcheck_traced_tree(
+    config: TracedTreeQuickcheckConfig,
+    f: fn(crate::tracing::Tree<usize>) -> Option<bool>,
+) -> RunResult {
+    let mut rng = rand::rng();
+    let mut passed = 0;
+    let mut discarded = 0;
+
+    for i in 0..config.tests {
+        let seed = rng.random::<u64>();
+        let size = (((i + 1) as f32).log2() as usize).min(config.max_size);
+        let (tree, trace) = match crate::tracing::generate_traced_tree(seed, size, config.max_depth)
+        {
+            Ok(value) => value,
+            Err(err) => {
+                return RunResult {
+                    status: ResultStatus::Aborted {
+                        error: format!("trace generation failed: {:?}", err),
+                    },
+                    passed,
+                    discarded,
+                };
+            },
+        };
+
+        let plain = tree.lift_back();
+        tracing::trace!("traced test #{} (seed={}): {:?}", i + 1, seed, plain);
+        match f(plain.clone()) {
+            None => discarded += 1,
+            Some(true) => passed += 1,
+            Some(false) => {
+                let shrunk_trace = crate::tracing::shrink_traced_tree(
+                    seed,
+                    size,
+                    config.max_depth,
+                    trace,
+                    |candidate| matches!(f(candidate.clone()), Some(false)),
+                );
+
+                let (shrunk_tree, _) = match crate::tracing::replay_traced_tree(
+                    seed,
+                    size,
+                    config.max_depth,
+                    &shrunk_trace,
+                ) {
+                    Ok(value) => value,
+                    Err(err) => {
+                        return RunResult {
+                            status: ResultStatus::Aborted {
+                                error: format!("replaying shrunk trace failed: {:?}", err),
+                            },
+                            passed,
+                            discarded,
+                        };
+                    },
+                };
+
+                let shrunk_plain = shrunk_tree.lift_back();
+                let root = traced_tree_root(&shrunk_plain);
+                return RunResult {
+                    status: ResultStatus::Failed {
+                        arguments: vec![
+                            format!("{:?}", shrunk_plain),
+                            format!("root={}", root),
+                            format!("seed={}", seed),
+                            format!("trace_len={}", shrunk_trace.len()),
+                        ],
+                    },
+                    passed,
+                    discarded,
+                };
+            },
+        }
+    }
+
+    RunResult { passed, discarded, status: ResultStatus::Finished }
+}
+
+#[cfg(feature = "tracing")]
+fn traced_tree_root(tree: &crate::tracing::Tree<usize>) -> usize {
+    match tree {
+        crate::tracing::Tree::Leaf(value) | crate::tracing::Tree::Node(value, _, _) => *value,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -298,5 +399,22 @@ mod tests {
         assert_eq!(result.passed, 100);
         assert_eq!(result.discarded, 0);
         assert!(result.status == ResultStatus::Finished);
+    }
+
+    #[cfg(feature = "tracing")]
+    #[test]
+    fn test_quickcheck_traced_tree_returns_shrunk_counterexample() {
+        let result = quickcheck_traced_tree(
+            TracedTreeQuickcheckConfig { tests: 16, max_size: 20, max_depth: 4 },
+            |_tree| Some(false),
+        );
+
+        match result.status {
+            ResultStatus::Failed { arguments } => {
+                assert!(arguments.iter().any(|arg| arg == "trace_len=0"));
+                assert!(arguments.iter().any(|arg| arg.starts_with("seed=")));
+            },
+            _ => panic!("expected traced quickcheck to fail with a shrunk counterexample"),
+        }
     }
 }

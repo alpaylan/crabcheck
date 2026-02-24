@@ -1,455 +1,669 @@
-// Tracing Generators
-
-use std::{
-    any::Any,
-    fmt::Debug,
-    ops::{
-        Deref,
-        RangeBounds,
-        Sub,
-    },
+use std::collections::{
+    HashMap,
+    HashSet,
 };
 
-use rand::{
-    Rng,
-    rngs::{
-        self,
-        ThreadRng,
+use {
+    rand::{
+        RngCore,
+        SeedableRng,
     },
+    rand_chacha::ChaCha8Rng,
 };
 
-use crate::tracing;
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
+pub struct Id(pub usize);
 
-#[derive(Clone, Debug)]
-enum Tree<T> {
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Operand {
+    Const(usize),
+    FromId(Id),
+}
+
+impl From<usize> for Operand {
+    fn from(value: usize) -> Self {
+        Self::Const(value)
+    }
+}
+
+impl Operand {
+    fn referenced_id(&self) -> Option<Id> {
+        match self {
+            Self::Const(_) => None,
+            Self::FromId(id) => Some(*id),
+        }
+    }
+
+    fn resolve(&self, values: &HashMap<Id, usize>) -> Option<usize> {
+        match self {
+            Self::Const(value) => Some(*value),
+            Self::FromId(id) => values.get(id).copied(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ChooseDecision {
+    pub id: Id,
+    pub lo: Operand,
+    pub hi: Operand,
+    pub picked: usize,
+    pub extra_deps: Vec<Id>,
+}
+
+impl ChooseDecision {
+    pub fn new(id: Id, lo: Operand, hi: Operand, picked: usize, extra_deps: Vec<Id>) -> Self {
+        Self { id, lo, hi, picked, extra_deps }
+    }
+
+    fn dependencies(&self) -> Vec<Id> {
+        let mut deps = Vec::new();
+        if let Some(id) = self.lo.referenced_id() {
+            deps.push(id);
+        }
+        if let Some(id) = self.hi.referenced_id() {
+            deps.push(id);
+        }
+        deps.extend(self.extra_deps.iter().copied());
+        deps.sort_unstable();
+        deps.dedup();
+        deps
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ChoiceTrace {
+    decisions: Vec<ChooseDecision>,
+}
+
+impl ChoiceTrace {
+    pub fn new(decisions: Vec<ChooseDecision>) -> Self {
+        Self { decisions }
+    }
+
+    pub fn decisions(&self) -> &[ChooseDecision] {
+        &self.decisions
+    }
+
+    pub fn len(&self) -> usize {
+        self.decisions.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.decisions.is_empty()
+    }
+
+    pub fn is_well_formed(&self) -> bool {
+        self.evaluated_ranges().is_some()
+    }
+
+    pub fn remove_with_dependents(&self, root: Id) -> Self {
+        let mut removed = HashSet::from([root]);
+        loop {
+            let mut changed = false;
+            for decision in &self.decisions {
+                if removed.contains(&decision.id) {
+                    continue;
+                }
+                if decision.dependencies().iter().any(|dep| removed.contains(dep)) {
+                    removed.insert(decision.id);
+                    changed = true;
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+
+        let decisions = self
+            .decisions
+            .iter()
+            .filter(|decision| !removed.contains(&decision.id))
+            .cloned()
+            .collect();
+        Self { decisions }
+    }
+
+    fn evaluated_ranges(&self) -> Option<Vec<(usize, usize)>> {
+        let mut seen = HashSet::new();
+        let mut values = HashMap::new();
+        let mut ranges = Vec::with_capacity(self.decisions.len());
+
+        for decision in &self.decisions {
+            if !seen.insert(decision.id) {
+                return None;
+            }
+
+            for dep in &decision.extra_deps {
+                if !values.contains_key(dep) {
+                    return None;
+                }
+            }
+
+            let lo = decision.lo.resolve(&values)?;
+            let hi = decision.hi.resolve(&values)?;
+            if lo > hi {
+                return None;
+            }
+            if decision.picked < lo || decision.picked > hi {
+                return None;
+            }
+
+            values.insert(decision.id, decision.picked);
+            ranges.push((lo, hi));
+        }
+
+        Some(ranges)
+    }
+
+    fn range_at(&self, index: usize) -> Option<(usize, usize)> {
+        self.evaluated_ranges().and_then(|ranges| ranges.get(index).copied())
+    }
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct TracedUsize {
+    pub id: Id,
+    pub value: usize,
+}
+
+impl TracedUsize {
+    pub fn as_operand(self) -> Operand {
+        Operand::FromId(self.id)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum TraceError {
+    MissingDependency { id: Id, dependency: Id },
+    InvalidRange { id: Id, lo: usize, hi: usize },
+    PickOutOfRange { id: Id, picked: usize, lo: usize, hi: usize },
+    DuplicateDecisionId { id: Id },
+}
+
+enum TraceMode {
+    Recording,
+    Replay { by_id: HashMap<Id, ChooseDecision> },
+}
+
+pub struct TraceRunner {
+    mode: TraceMode,
+    rng: ChaCha8Rng,
+    values: HashMap<Id, usize>,
+    emitted: Vec<ChooseDecision>,
+    next_id: usize,
+}
+
+impl TraceRunner {
+    pub fn recording(seed: u64) -> Self {
+        Self {
+            mode: TraceMode::Recording,
+            rng: ChaCha8Rng::seed_from_u64(seed),
+            values: HashMap::new(),
+            emitted: Vec::new(),
+            next_id: 1,
+        }
+    }
+
+    pub fn replay(seed: u64, plan: &ChoiceTrace) -> Self {
+        let by_id =
+            plan.decisions.iter().cloned().map(|decision| (decision.id, decision)).collect();
+
+        Self {
+            mode: TraceMode::Replay { by_id },
+            rng: ChaCha8Rng::seed_from_u64(seed),
+            values: HashMap::new(),
+            emitted: Vec::new(),
+            next_id: 1,
+        }
+    }
+
+    pub fn choose_usize(
+        &mut self,
+        lo: Operand,
+        hi: Operand,
+        extra_deps: &[Id],
+    ) -> Result<TracedUsize, TraceError> {
+        let id = Id(self.next_id);
+        self.next_id += 1;
+        self.choose_usize_with_id(id, lo, hi, extra_deps)
+    }
+
+    pub fn choose_usize_with_id(
+        &mut self,
+        id: Id,
+        lo: Operand,
+        hi: Operand,
+        extra_deps: &[Id],
+    ) -> Result<TracedUsize, TraceError> {
+        // Always consume one RNG draw so replay stays deterministic even
+        // when a decision is taken from the planned trace.
+        let draw = self.rng.next_u64();
+
+        let planned_pick = match &self.mode {
+            TraceMode::Recording => None,
+            TraceMode::Replay { by_id } => by_id.get(&id).map(|decision| decision.picked),
+        };
+        let is_planned = planned_pick.is_some();
+        let mut decision = ChooseDecision::new(id, lo, hi, 0, extra_deps.to_vec());
+
+        if self.values.contains_key(&id) {
+            return Err(TraceError::DuplicateDecisionId { id });
+        }
+
+        for dep in &decision.extra_deps {
+            if !self.values.contains_key(dep) {
+                return Err(TraceError::MissingDependency { id, dependency: *dep });
+            }
+        }
+
+        let resolved_lo = decision.lo.resolve(&self.values).ok_or_else(|| {
+            TraceError::MissingDependency {
+                id,
+                dependency: decision.lo.referenced_id().expect("referenced id must exist"),
+            }
+        })?;
+        let resolved_hi = decision.hi.resolve(&self.values).ok_or_else(|| {
+            TraceError::MissingDependency {
+                id,
+                dependency: decision.hi.referenced_id().expect("referenced id must exist"),
+            }
+        })?;
+
+        if resolved_lo > resolved_hi {
+            return Err(TraceError::InvalidRange { id, lo: resolved_lo, hi: resolved_hi });
+        }
+
+        let picked = if is_planned {
+            let picked = planned_pick.expect("planned pick should exist when is_planned=true");
+            if picked < resolved_lo || picked > resolved_hi {
+                return Err(TraceError::PickOutOfRange {
+                    id,
+                    picked,
+                    lo: resolved_lo,
+                    hi: resolved_hi,
+                });
+            }
+            picked
+        } else {
+            match &self.mode {
+                TraceMode::Recording => sample_from_draw(draw, resolved_lo, resolved_hi),
+                // In replay mode, a missing decision means "removed by shrinking".
+                // We re-materialize it using the smallest valid choice.
+                TraceMode::Replay { .. } => resolved_lo,
+            }
+        };
+
+        decision.picked = picked;
+        self.values.insert(id, picked);
+        self.emitted.push(decision);
+
+        Ok(TracedUsize { id, value: picked })
+    }
+
+    pub fn finish(self) -> ChoiceTrace {
+        ChoiceTrace::new(self.emitted)
+    }
+}
+
+pub fn shrink_trace<F>(initial: ChoiceTrace, mut fails: F) -> ChoiceTrace
+where
+    F: FnMut(&ChoiceTrace) -> bool,
+{
+    if !fails(&initial) {
+        return initial;
+    }
+
+    let mut current = initial;
+    loop {
+        let mut changed = false;
+
+        let ids = current.decisions.iter().map(|decision| decision.id).collect::<Vec<_>>();
+        for id in ids {
+            let candidate = current.remove_with_dependents(id);
+            if candidate.len() >= current.len() {
+                continue;
+            }
+            if !candidate.is_well_formed() {
+                continue;
+            }
+            if fails(&candidate) {
+                current = candidate;
+                changed = true;
+                break;
+            }
+        }
+
+        if changed {
+            continue;
+        }
+
+        for index in 0..current.decisions.len() {
+            if try_shrink_decision_at(&mut current, index, &mut fails) {
+                changed = true;
+                break;
+            }
+        }
+
+        if !changed {
+            return current;
+        }
+    }
+}
+
+fn try_shrink_decision_at<F>(trace: &mut ChoiceTrace, index: usize, fails: &mut F) -> bool
+where
+    F: FnMut(&ChoiceTrace) -> bool,
+{
+    let (resolved_lo, _) = match trace.range_at(index) {
+        Some(range) => range,
+        None => return false,
+    };
+
+    let picked = trace.decisions[index].picked;
+    for new_picked in resolved_lo..picked {
+        let mut candidate = trace.clone();
+        candidate.decisions[index].picked = new_picked;
+        if !candidate.is_well_formed() {
+            continue;
+        }
+        if fails(&candidate) {
+            *trace = candidate;
+            return true;
+        }
+    }
+
+    if let Operand::Const(hi_const) = trace.decisions[index].hi {
+        let min_hi = resolved_lo.max(trace.decisions[index].picked);
+        for new_hi in min_hi..hi_const {
+            let mut candidate = trace.clone();
+            candidate.decisions[index].hi = Operand::Const(new_hi);
+            if !candidate.is_well_formed() {
+                continue;
+            }
+            if fails(&candidate) {
+                *trace = candidate;
+                return true;
+            }
+        }
+    }
+
+    if let Operand::Const(lo_const) = trace.decisions[index].lo {
+        for new_lo in 0..lo_const {
+            let mut candidate = trace.clone();
+            candidate.decisions[index].lo = Operand::Const(new_lo);
+            if !candidate.is_well_formed() {
+                continue;
+            }
+            if fails(&candidate) {
+                *trace = candidate;
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
+fn sample_from_draw(draw: u64, lo: usize, hi: usize) -> usize {
+    let span = (hi as u128) - (lo as u128) + 1;
+    let offset = (draw as u128) % span;
+    (lo as u128 + offset) as usize
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Tree<T> {
     Leaf(T),
     Node(T, Box<Tree<T>>, Box<Tree<T>>),
 }
 
-struct Gen<T> {
-    g: Box<dyn FnMut(usize, &mut rngs::ThreadRng) -> T>,
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum TrTree<T> {
+    TrLeaf(Id, T),
+    TrNode(Id, T, Box<TrTree<T>>, Box<TrTree<T>>),
 }
 
-impl<T: Clone + 'static> Gen<T> {
-    fn ret(t: T) -> Self {
-        Gen { g: Box::new(move |_, _| t.clone()) }
-    }
-
-    fn bind<U>(self, mut f: impl FnMut(T) -> Gen<U> + 'static) -> Gen<U> {
-        let mut g = self.g;
-        Gen { g: Box::new(move |size, rng| (f(g(size, rng)).g)(size, rng)) }
-    }
-}
-
-trait Arbitrary: Clone + 'static {
-    fn arbitrary() -> Gen<Self> {
-        Gen::bind(Choose::choose(0..=100), |n| Self::arbitrary_sized(n))
-    }
-
-    fn arbitrary_sized(n: usize) -> Gen<Self>;
-}
-
-trait Choose {
-    fn choose(range: std::ops::RangeInclusive<Self>) -> Gen<Self>
-    where
-        Self: Sized + 'static;
-}
-
-impl Choose for usize {
-    fn choose(range: std::ops::RangeInclusive<Self>) -> Gen<Self> {
-        Gen { g: Box::new(move |_, rng| rng.random_range(range.clone())) }
-    }
-}
-
-impl Arbitrary for usize {
-    fn arbitrary_sized(n: usize) -> Gen<Self> {
-        Choose::choose(0..=n)
-    }
-}
-
-impl<T: Arbitrary + Clone + 'static> Arbitrary for Tree<T> {
-    fn arbitrary_sized(n: usize) -> Gen<Tree<T>> {
-        match n {
-            0 => Gen::bind(T::arbitrary(), |t| Gen::ret(Tree::Leaf(t))),
-            _ => {
-                Gen::bind(T::arbitrary(), move |t: T| {
-                    Gen::bind(Tree::<T>::arbitrary_sized(n - 1), move |left: Tree<T>| {
-                        let t = t.clone();
-                        Gen::bind(Tree::<T>::arbitrary_sized(n - 1), move |right: Tree<T>| {
-                            Gen::ret(Tree::Node(
-                                t.clone(),
-                                Box::new(left.clone()),
-                                Box::new(right.clone()),
-                            ))
-                        })
-                    })
-                })
+impl TrTree<TracedUsize> {
+    pub fn lift_back(self) -> Tree<usize> {
+        match self {
+            Self::TrLeaf(_, value) => Tree::Leaf(value.value),
+            Self::TrNode(_, value, left, right) => {
+                Tree::Node(value.value, Box::new(left.lift_back()), Box::new(right.lift_back()))
             },
         }
     }
-}
 
-// struct Trace<T> {
-//     id: Id,
-//     value: T,
-// }
-
-#[derive(Copy, Clone, Debug)]
-struct Id(usize);
-
-impl Deref for Id {
-    type Target = usize;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-impl Id {
-    fn new() -> Self {
-        static mut ID: usize = 0;
-        unsafe {
-            ID += 1;
-            Id(ID)
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
-enum TrTree<T> {
-    TrLeaf(Option<Id>, T),
-    TrNode(Option<Id>, T, Box<TrTree<T>>, Box<TrTree<T>>),
-}
-
-trait LiftBack<T> {
-    fn lift_back(self) -> T
-    where
-        Self: Sized;
-}
-
-impl<T1: LiftBack<T2>, T2> LiftBack<Tree<T2>> for TrTree<T1> {
-    fn lift_back(self) -> Tree<T2> {
+    pub fn id(&self) -> Id {
         match self {
-            TrTree::TrLeaf(_, t) => Tree::Leaf(t.lift_back()),
-            TrTree::TrNode(_, t, left, right) => {
-                Tree::Node(t.lift_back(), Box::new(left.lift_back()), Box::new(right.lift_back()))
-            },
+            Self::TrLeaf(id, _) | Self::TrNode(id, _, _, _) => *id,
         }
     }
 }
 
-impl LiftBack<usize> for TrUsize {
-    fn lift_back(self) -> usize {
-        self.n
+impl TracedUsize {
+    pub fn arbitrary_sized(
+        runner: &mut TraceRunner,
+        size: TracedUsize,
+    ) -> Result<TracedUsize, TraceError> {
+        runner.choose_usize(0.into(), size.as_operand(), &[size.id])
     }
 }
 
-impl<T: Traced> Traced for TrTree<T> {
-    fn id(&self) -> Option<Id> {
-        match self {
-            TrTree::TrLeaf(id, _) => id.clone(),
-            TrTree::TrNode(id, _, _, _) => id.clone(),
+impl TrTree<TracedUsize> {
+    pub fn arbitrary_sized(
+        runner: &mut TraceRunner,
+        depth: usize,
+        size: TracedUsize,
+    ) -> Result<Self, TraceError> {
+        let value = TracedUsize::arbitrary_sized(runner, size)?;
+        let max_branch = if depth == 0 { 0 } else { 1 };
+        let branch = runner.choose_usize(0.into(), max_branch.into(), &[size.id, value.id])?;
+
+        if branch.value == 0 {
+            Ok(Self::TrLeaf(branch.id, value))
+        } else {
+            let left_size =
+                runner.choose_usize(0.into(), size.as_operand(), &[branch.id, size.id])?;
+            let right_size =
+                runner.choose_usize(0.into(), size.as_operand(), &[branch.id, size.id])?;
+            let left = Self::arbitrary_sized(runner, depth - 1, left_size)?;
+            let right = Self::arbitrary_sized(runner, depth - 1, right_size)?;
+            Ok(Self::TrNode(branch.id, value, Box::new(left), Box::new(right)))
         }
     }
 }
 
-#[derive(Clone, Debug)]
-enum Val {
-    Id(Id),
-    Val(String),
+pub fn generate_traced_tree(
+    seed: u64,
+    max_size: usize,
+    max_depth: usize,
+) -> Result<(TrTree<TracedUsize>, ChoiceTrace), TraceError> {
+    let mut runner = TraceRunner::recording(seed);
+    let root_size = runner.choose_usize(0.into(), max_size.into(), &[])?;
+    let tree = TrTree::<TracedUsize>::arbitrary_sized(&mut runner, max_depth, root_size)?;
+    Ok((tree, runner.finish()))
 }
 
-#[derive(Clone)]
-enum Trace {
-    // Bind(Id, Val),
-    Ret(Id, ThreadRng, Val),
-    Choose(Id, ThreadRng, Val, Val),
-    // OneOf(Id, Vec<Val>),
-    // Freq(Id, Vec<(u32, Val)>),
+pub fn replay_traced_tree(
+    seed: u64,
+    max_size: usize,
+    max_depth: usize,
+    trace: &ChoiceTrace,
+) -> Result<(TrTree<TracedUsize>, ChoiceTrace), TraceError> {
+    let mut runner = TraceRunner::replay(seed, trace);
+    let root_size = runner.choose_usize(0.into(), max_size.into(), &[])?;
+    let tree = TrTree::<TracedUsize>::arbitrary_sized(&mut runner, max_depth, root_size)?;
+    Ok((tree, runner.finish()))
 }
 
-impl Trace {
-    fn id(&self) -> Id {
-        match self {
-            // Self::Bind(id, _)
-            | Self::Ret(id, _, _)
-            | Self::Choose(id, _, _, _)
-            // | Self::OneOf(id, _)
-            // | Self::Freq(id, _) 
-            => id.clone(),
+pub fn shrink_traced_tree<F>(
+    seed: u64,
+    max_size: usize,
+    max_depth: usize,
+    initial: ChoiceTrace,
+    mut fails_tree: F,
+) -> ChoiceTrace
+where
+    F: FnMut(&Tree<usize>) -> bool,
+{
+    shrink_trace(initial, |candidate| {
+        let replayed = replay_traced_tree(seed, max_size, max_depth, candidate);
+        match replayed {
+            Ok((tree, _trace)) => fails_tree(&tree.lift_back()),
+            Err(_) => false,
         }
-    }
-    // fn bind(value: Val) -> Self {
-    //     Self::Bind(Id::new(), value)
-    // }
-    fn ret(value: Val, rng: &ThreadRng) -> Self {
-        Self::Ret(Id::new(), rng.clone(), value)
-    }
-    fn choose(lo: Val, hi: Val, rng: &ThreadRng) -> Self {
-        Self::Choose(Id::new(), rng.clone(), lo, hi)
-    }
-    // fn one_of(vals: Vec<Val>) -> Self {
-    //     Self::OneOf(Id::new(), vals)
-    // }
-    // fn freq(choices: Vec<(u32, Val)>) -> Self {
-    //     Self::Freq(Id::new(), choices)
-    // }
-}
-
-struct Traces(Vec<Trace>);
-
-impl Traces {
-    fn one(trace: Trace) -> Self {
-        Traces(vec![trace])
-    }
-}
-
-impl From<usize> for TrUsize {
-    fn from(n: usize) -> Self {
-        TrUsize { id: None, n }
-    }
-}
-
-struct TrGen<T: Traced> {
-    g: Box<dyn FnMut(usize, &mut rngs::ThreadRng) -> (T, Traces)>,
-}
-
-impl<T: Traced> TrGen<T> {
-    fn ret(t: T) -> Self {
-        TrGen {
-            g: Box::new(move |_, rng| {
-                let trace =
-                    t.id().map(|id| Trace::Ret(id, rng.clone(), Val::Val(format!("{:?}", t))));
-                (t.clone(), Traces(trace.clone().map_or(vec![], |t| vec![t])))
-            }),
-        }
-    }
-
-    fn bind<U: Traced>(mut self, mut f: impl FnMut(T) -> TrGen<U> + 'static) -> TrGen<U> {
-        TrGen {
-            g: Box::new(move |size, rng| {
-                let g = &mut self.g;
-                let mut gen_first = move |size, rng| {
-                    let (value, traces) = g(size, rng);
-                    (value, traces)
-                };
-
-                let (value, traces) = gen_first(size, rng);
-                let mut new_gen = f(value);
-                let (next_value, next_traces) = (new_gen.g)(size, rng);
-                let mut combined_traces = traces.0;
-                combined_traces.extend(next_traces.0);
-                (next_value, Traces(combined_traces))
-            }),
-        }
-    }
-}
-
-trait Traced: Debug + Clone + 'static {
-    fn id(&self) -> Option<Id>;
-}
-
-trait TrArbitrary: Traced {
-    fn arbitrary() -> TrGen<Self> {
-        TrGen::bind(TrChoose::choose(0.into(), 100.into()), |n: TrUsize| {
-            <Self as TrArbitrary>::arbitrary_sized(n)
-        })
-    }
-
-    fn arbitrary_sized(n: TrUsize) -> TrGen<Self>;
-}
-
-trait TrChoose: Traced {
-    fn choose(lo: Self, hi: Self) -> TrGen<Self>;
-}
-
-fn one_of<T: Traced>(choices: &'static mut Vec<TrGen<T>>) -> TrGen<T> {
-    if choices.is_empty() {
-        panic!("Cannot use `one_of` from an empty set");
-    }
-
-    // let trace = Trace::one_of(choices.iter().map(|c| Val::Id(c.id)).collect());
-    // let id = trace.id();
-
-    TrGen {
-        g: Box::new(move |_, rng: &mut rngs::ThreadRng| {
-            let index = rng.random_range(0..choices.len());
-            let choice = &mut choices[index];
-            let (value, mut traces) = (choice.g)(0, rng);
-            // traces.0.push(trace.clone());
-            (value, traces)
-        }),
-    }
-}
-
-fn freq<T: Traced>(mut choices: Vec<(u32, TrGen<T>)>) -> TrGen<T> {
-    if choices.is_empty() {
-        panic!("Cannot use `freq` from an empty set");
-    }
-
-    let total_weight: u32 = choices.iter().map(|(weight, _)| weight).sum();
-    // let trace = Trace::freq(
-    //     choices.iter().map(|(weight, val)| (weight.clone(), Val::Id(val.id))).collect(),
-    // );
-    // let id = trace.id();
-
-    TrGen {
-        g: Box::new(move |_, rng: &mut rngs::ThreadRng| {
-            let mut cumulative_weight = 0;
-            let choice = choices
-                .iter_mut()
-                .find(|(weight, _)| {
-                    cumulative_weight += weight;
-                    cumulative_weight > rng.random_range(0..total_weight)
-                })
-                .expect("No choice found in frequency distribution");
-            let (value, mut traces) = (choice.1.g)(0, rng);
-            // traces.0.insert(0, trace.clone());
-            (value, traces)
-        }),
-    }
-}
-
-impl TrChoose for TrUsize {
-    fn choose(lo: TrUsize, hi: TrUsize) -> TrGen<Self> {
-        TrGen {
-            g: Box::new(move |_, rng| {
-                let trace = Trace::choose(
-                    lo.id.map_or(Val::Val(lo.n.to_string()), |id| Val::Id(id)),
-                    hi.id.map_or(Val::Val(hi.n.to_string()), |id| Val::Id(id)),
-                    &rng,
-                );
-
-                let value = rng.random_range(lo.n..=hi.n);
-                (TrUsize { id: Some(trace.id()), n: value }, Traces(vec![trace.clone()]))
-            }),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-struct TrUsize {
-    id: Option<Id>,
-    n: usize,
-}
-
-impl TrUsize {
-    fn decr(&self) -> Self {
-        TrUsize { id: self.id.clone(), n: self.n - 1 }
-    }
-}
-
-impl Traced for TrUsize {
-    fn id(&self) -> Option<Id> {
-        self.id.clone()
-    }
-}
-
-impl TrArbitrary for TrUsize {
-    fn arbitrary_sized(n: TrUsize) -> TrGen<Self> {
-        TrChoose::choose(TrUsize { id: None, n: 0 }, n)
-    }
-}
-
-impl<T: TrArbitrary> TrArbitrary for TrTree<T> {
-    fn arbitrary_sized(n: TrUsize) -> TrGen<TrTree<T>> {
-        match n.n {
-            0 => TrGen::bind(T::arbitrary(), |t| TrGen::ret(TrTree::TrLeaf(Some(Id::new()), t))),
-            n_ => {
-                freq(vec![
-                    (
-                        1,
-                        TrGen::bind(T::arbitrary(), |t| {
-                            TrGen::ret(TrTree::TrLeaf(Some(Id::new()), t))
-                        }),
-                    ),
-                    (
-                        n_ as u32,
-                        TrGen::bind(T::arbitrary(), move |t: T| {
-                            TrGen::bind(
-                                TrTree::<T>::arbitrary_sized(n.decr()),
-                                move |left: TrTree<T>| {
-                                    let t = t.clone();
-                                    TrGen::bind(
-                                        TrTree::<T>::arbitrary_sized(n.decr()),
-                                        move |right: TrTree<T>| {
-                                            TrGen::ret(TrTree::TrNode(
-                                                Some(Id::new()),
-                                                t.clone(),
-                                                Box::new(left.clone()),
-                                                Box::new(right.clone()),
-                                            ))
-                                        },
-                                    )
-                                },
-                            )
-                        }),
-                    ),
-                ])
-            },
-        }
-    }
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn run_program(
+        seed: u64,
+        plan: Option<&ChoiceTrace>,
+    ) -> Result<(usize, ChoiceTrace), TraceError> {
+        let mut runner = match plan {
+            Some(trace) => TraceRunner::replay(seed, trace),
+            None => TraceRunner::recording(seed),
+        };
+
+        let size = runner.choose_usize(0.into(), 10.into(), &[])?;
+        let branch = runner.choose_usize(0.into(), 1.into(), &[size.id])?;
+        let child = if branch.value == 1 {
+            runner.choose_usize(0.into(), size.as_operand(), &[branch.id])?.value
+        } else {
+            0
+        };
+
+        Ok((size.value + child, runner.finish()))
+    }
+
     #[test]
-    fn test_tree_arbitrary() {
-        let mut rng = rand::thread_rng();
-        // let mut tree_gen = <Tree<usize> as Arbitrary>::arbitrary_sized(3);
-        // let tree = (tree_gen.g)(3, &mut rng);
+    fn explicit_duplicate_id_is_rejected() {
+        let mut runner = TraceRunner::recording(1);
+        let first = runner
+            .choose_usize_with_id(Id(42), 0.into(), 10.into(), &[])
+            .expect("first explicit id should succeed");
+        assert_eq!(first.id, Id(42));
 
-        let mut tree_gen = <TrTree<TrUsize> as TrArbitrary>::arbitrary_sized(3.into());
-        let (tree, traces) = (tree_gen.g)(1, &mut rng);
+        let err = runner
+            .choose_usize_with_id(Id(42), 0.into(), 10.into(), &[])
+            .expect_err("duplicate explicit id should fail");
+        assert_eq!(err, TraceError::DuplicateDecisionId { id: Id(42) });
+    }
 
-        println!("Generated Tree: {:?}", tree.lift_back());
-        println!(
-            "Traces: {:#?}",
-            traces
-                .0
+    #[test]
+    fn replay_with_removed_explicit_id_rebuilds_missing_choice_at_minimum() {
+        let mut recorder = TraceRunner::recording(9);
+        let root = recorder
+            .choose_usize_with_id(Id(1), 1.into(), 6.into(), &[])
+            .expect("root choice should be recorded");
+        let maybe_removed = recorder
+            .choose_usize_with_id(Id(2), 0.into(), root.as_operand(), &[root.id])
+            .expect("middle choice should be recorded");
+        let leaf = recorder
+            .choose_usize_with_id(Id(3), maybe_removed.as_operand(), 10.into(), &[maybe_removed.id])
+            .expect("leaf choice should be recorded");
+        let recorded = recorder.finish();
+        assert_eq!(recorded.len(), 3);
+
+        let shrunk_plan = recorded.remove_with_dependents(Id(2));
+        assert_eq!(shrunk_plan.decisions().iter().map(|d| d.id).collect::<Vec<_>>(), vec![Id(1)]);
+
+        let mut replay = TraceRunner::replay(9, &shrunk_plan);
+        let replay_root = replay
+            .choose_usize_with_id(Id(1), 1.into(), 6.into(), &[])
+            .expect("root should come from plan");
+        let replay_middle = replay
+            .choose_usize_with_id(Id(2), 0.into(), replay_root.as_operand(), &[replay_root.id])
+            .expect("missing explicit id should be re-materialized");
+        let replay_leaf = replay
+            .choose_usize_with_id(Id(3), replay_middle.as_operand(), 10.into(), &[replay_middle.id])
+            .expect("dependent choice should replay with rebuilt dependency");
+        let replayed_trace = replay.finish();
+
+        assert_eq!(replay_root.id, root.id);
+        assert_eq!(replay_root.value, root.value);
+        assert_eq!(replay_middle.id, maybe_removed.id);
+        assert_eq!(replay_middle.value, 0);
+        assert_eq!(replay_leaf.id, leaf.id);
+        assert_eq!(replayed_trace.len(), 3);
+    }
+
+    #[test]
+    fn remove_with_dependents_cascades() {
+        let trace = ChoiceTrace::new(vec![
+            ChooseDecision::new(Id(1), 0.into(), 10.into(), 8, vec![]),
+            ChooseDecision::new(Id(2), 0.into(), 1.into(), 1, vec![Id(1)]),
+            ChooseDecision::new(Id(3), 0.into(), Operand::FromId(Id(1)), 4, vec![Id(2)]),
+        ]);
+
+        let candidate = trace.remove_with_dependents(Id(2));
+        let ids = candidate.decisions().iter().map(|decision| decision.id).collect::<Vec<_>>();
+        assert_eq!(ids, vec![Id(1)]);
+        assert!(candidate.is_well_formed());
+    }
+
+    #[test]
+    fn replay_is_deterministic_with_seed_and_trace() {
+        let (original_output, original_trace) =
+            run_program(7, None).expect("recording should succeed");
+        let (replayed_output, replayed_trace) =
+            run_program(7, Some(&original_trace)).expect("replay should succeed");
+
+        assert_eq!(original_output, replayed_output);
+        assert_eq!(original_trace, replayed_trace);
+    }
+
+    #[test]
+    fn shrink_trace_removes_choices_and_minimizes_values() {
+        let initial = ChoiceTrace::new(vec![
+            ChooseDecision::new(Id(1), 0.into(), 20.into(), 15, vec![]),
+            ChooseDecision::new(Id(2), 0.into(), 1.into(), 1, vec![Id(1)]),
+            ChooseDecision::new(Id(3), 0.into(), Operand::FromId(Id(1)), 10, vec![Id(2)]),
+        ]);
+
+        let shrunk = shrink_trace(initial, |trace| {
+            if !trace.is_well_formed() {
+                return false;
+            }
+
+            let root = trace
+                .decisions()
                 .iter()
-                .map(|t| {
-                    match t {
-                        // Trace::Bind(id, value) => format!("{:?} <- {:?}", id, value),
-                        Trace::Ret(id, rng, value) => {
-                            format!("{:?} <- {:?} (rng: {:?})", id, value, rng)
-                        },
-                        Trace::Choose(id, rng, lo, hi) => {
-                            format!("{:?} <- choose({:?}, {:?}) (rng: {:?}", id, lo, hi, rng)
-                        },
-                        // Trace::OneOf(id, vals) => format!(
-                        //     "{:?} <- one_of({})",
-                        //     id,
-                        //     vals.iter()
-                        //         .map(|v| match v {
-                        //             Val::Id(id) => format!("{:?}", id),
-                        //             Val::Val(val) => val.clone(),
-                        //         })
-                        //         .collect::<Vec<_>>()
-                        //         .join(", ")
-                        // ),
-                        // Trace::Freq(id, choices) => format!(
-                        //     "{:?} <- freq({})",
-                        //     id,
-                        //     choices
-                        //         .iter()
-                        //         .map(|(weight, val)| {
-                        //             format!(
-                        //                 "{}: {:?}",
-                        //                 weight,
-                        //                 match val {
-                        //                     Val::Id(id) => format!("{:?}", id),
-                        //                     Val::Val(val) => val.clone(),
-                        //                 }
-                        //             )
-                        //         })
-                        //         .collect::<Vec<_>>()
-                        //         .join(", ")
-                        // ),
-                    }
-                })
-                .collect::<Vec<_>>()
-        );
+                .find(|decision| decision.id == Id(1))
+                .map(|decision| decision.picked)
+                .unwrap_or(0);
+
+            root >= 4
+        });
+
+        assert_eq!(shrunk.len(), 1);
+        let root = &shrunk.decisions()[0];
+        assert_eq!(root.id, Id(1));
+        assert_eq!(root.picked, 4);
+        assert_eq!(root.hi, Operand::Const(4));
+    }
+
+    #[test]
+    fn traced_tree_record_and_replay_match() {
+        let (tree, trace) = generate_traced_tree(17, 12, 3).expect("recording should succeed");
+        let (replayed_tree, replayed_trace) =
+            replay_traced_tree(17, 12, 3, &trace).expect("replay should succeed");
+
+        assert_eq!(tree, replayed_tree);
+        assert_eq!(trace, replayed_trace);
+    }
+
+    #[test]
+    fn traced_tree_shrinking_reduces_choices() {
+        let (_tree, trace) = generate_traced_tree(9, 20, 4).expect("recording should succeed");
+        let shrunk = shrink_traced_tree(9, 20, 4, trace.clone(), |_candidate| true);
+
+        assert!(shrunk.len() <= trace.len());
+        let (shrunk_tree, _shrunk_trace) =
+            replay_traced_tree(9, 20, 4, &shrunk).expect("replaying shrunk trace should succeed");
+        let _shrunk_plain = shrunk_tree.lift_back();
     }
 }
