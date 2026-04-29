@@ -176,6 +176,7 @@ impl TracedUsize {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TraceError {
     MissingDependency { id: Id, dependency: Id },
+    MissingPlannedDecision { id: Id },
     InvalidRange { id: Id, lo: usize, hi: usize },
     PickOutOfRange { id: Id, picked: usize, lo: usize, hi: usize },
     DuplicateDecisionId { id: Id },
@@ -288,9 +289,7 @@ impl TraceRunner {
         } else {
             match &self.mode {
                 TraceMode::Recording => sample_from_draw(draw, resolved_lo, resolved_hi),
-                // In replay mode, a missing decision means "removed by shrinking".
-                // We re-materialize it using the smallest valid choice.
-                TraceMode::Replay { .. } => resolved_lo,
+                TraceMode::Replay { .. } => return Err(TraceError::MissingPlannedDecision { id }),
             }
         };
 
@@ -554,7 +553,7 @@ mod tests {
     }
 
     #[test]
-    fn replay_with_removed_explicit_id_rebuilds_missing_choice_at_minimum() {
+    fn replay_with_removed_explicit_id_fails_strictly() {
         let mut recorder = TraceRunner::recording(9);
         let root = recorder
             .choose_usize_with_id(Id(1), 1.into(), 6.into(), &[])
@@ -575,20 +574,16 @@ mod tests {
         let replay_root = replay
             .choose_usize_with_id(Id(1), 1.into(), 6.into(), &[])
             .expect("root should come from plan");
-        let replay_middle = replay
-            .choose_usize_with_id(Id(2), 0.into(), replay_root.as_operand(), &[replay_root.id])
-            .expect("missing explicit id should be re-materialized");
-        let replay_leaf = replay
-            .choose_usize_with_id(Id(3), replay_middle.as_operand(), 10.into(), &[replay_middle.id])
-            .expect("dependent choice should replay with rebuilt dependency");
-        let replayed_trace = replay.finish();
-
         assert_eq!(replay_root.id, root.id);
         assert_eq!(replay_root.value, root.value);
-        assert_eq!(replay_middle.id, maybe_removed.id);
-        assert_eq!(replay_middle.value, 0);
-        assert_eq!(replay_leaf.id, leaf.id);
-        assert_eq!(replayed_trace.len(), 3);
+
+        let err = replay
+            .choose_usize_with_id(Id(2), 0.into(), replay_root.as_operand(), &[replay_root.id])
+            .expect_err("missing explicit id should fail in strict replay");
+        assert_eq!(err, TraceError::MissingPlannedDecision { id: maybe_removed.id });
+        let replayed_trace = replay.finish();
+        assert_eq!(replayed_trace.len(), 1);
+        assert_eq!(leaf.id, Id(3));
     }
 
     #[test]

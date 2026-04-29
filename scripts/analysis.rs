@@ -1,4 +1,5 @@
 use {
+    crabcheck::sbfl::Suspiciousness,
     rayon::prelude::*,
     serde::{
         Deserialize,
@@ -153,58 +154,6 @@ fn aggregate_hits(paths: &[PathBuf], module: &str) -> HashMap<RegionKey, u64> {
             }
             acc
         })
-}
-
-#[derive(Debug, Serialize)]
-struct Suspiciousness {
-    tarantula: f64,
-    ochiai: f64,
-    dstar: f64,
-    jaccard: f64,
-    op2: f64,
-}
-
-impl Suspiciousness {
-    fn compute(ef: u64, ep: u64, nf: u64, np: u64) -> Self {
-        let ef = ef as f64;
-        let ep = ep as f64;
-        let nf = nf as f64;
-        let _np = np as f64;
-        let f = ef + nf;
-        let p = ep + _np;
-
-        let tarantula = {
-            let ef_over_f = if f > 0.0 { ef / f } else { 0.0 };
-            let ep_over_p = if p > 0.0 { ep / p } else { 0.0 };
-            let denom = ef_over_f + ep_over_p;
-            if denom > 0.0 { ef_over_f / denom } else { 0.0 }
-        };
-
-        let ochiai = {
-            let denom = (f * (ef + ep)).sqrt();
-            if denom > 0.0 { ef / denom } else { 0.0 }
-        };
-
-        let dstar = {
-            let denom = ep + nf;
-            if denom > 0.0 {
-                (ef * ef) / denom
-            } else if ef > 0.0 {
-                f64::MAX
-            } else {
-                0.0
-            }
-        };
-
-        let jaccard = {
-            let denom = ef + nf + ep;
-            if denom > 0.0 { ef / denom } else { 0.0 }
-        };
-
-        let op2 = ef - ep / (p + 1.0);
-
-        Suspiciousness { tarantula, ochiai, dstar, jaccard, op2 }
-    }
 }
 
 fn main() {

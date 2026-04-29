@@ -3,8 +3,11 @@ pub mod parallelism;
 #[cfg(feature = "profiling")]
 pub mod profiling;
 pub mod quickcheck;
+pub mod sbfl;
 pub mod seedpool;
 pub mod targeting;
+#[cfg(feature = "tracing")]
+pub mod auto_trace;
 #[cfg(feature = "tracing")]
 pub mod tracing;
 pub mod utils;

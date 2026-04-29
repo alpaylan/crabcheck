@@ -41,5 +41,15 @@ name = "crabcheck-profiling-demangler"
 path = "scripts/demangler.rs"
 
 [[bin]]
+name = "crabcheck-profiling-output-demangler"
+path = "scripts/output_demangler.rs"
+required-features = ["profiling"]
+
+[[bin]]
+name = "crabcheck-profiling-fast-analyze"
+path = "scripts/fast_analysis.rs"
+required-features = ["profiling"]
+
+[[bin]]
 name = "profraw-reader"
 path = "scripts/profraw.rs"
