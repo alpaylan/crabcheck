@@ -100,6 +100,7 @@ where
     let (config, problems) = config.clone().apply_env_vars(std::env::vars());
     let seed = config.seed.unwrap_or_else(random_seed);
     let mut run = Run::new(&config, &generator, property, seed, property_name(&config));
+    run.report.run = crate::report::RunSpec::current();
     for problem in problems {
         run.report.warn("config_env", problem);
     }
@@ -236,6 +237,7 @@ where
 
     let seed = config.seed.unwrap_or_else(random_seed);
     let mut run = Run::new(&config, &generator, &property, seed, property_name(&config));
+    run.report.run = crate::report::RunSpec::current();
     run.report.threads = threads;
     for problem in problems {
         run.report.warn("config_env", problem);
@@ -314,6 +316,8 @@ struct CoverageState {
     #[cfg(feature = "json")]
     grid: Option<crate::coverage::grid::Grid>,
     signature: Option<Signature>,
+    /// `type_name` of the property, so the grid can point at its function.
+    property_type: &'static str,
 }
 
 #[cfg(feature = "coverage")]
@@ -326,6 +330,7 @@ impl CoverageState {
             #[cfg(feature = "json")]
             grid: None,
             signature: None,
+            property_type: "",
         }
     }
 
@@ -994,6 +999,7 @@ where
             }
             return None;
         }
+        self.coverage.property_type = std::any::type_name::<P>();
         let filter = if settings.filter.is_empty() {
             crate_of(std::any::type_name::<P>()).to_string()
         } else {
@@ -1694,10 +1700,13 @@ where
                         .map(|s| (s.debug.clone(), s.origin.to_string(), s.size))
                         .collect();
                     let html = grid.render(
-                        &self.name,
-                        self.seed,
-                        self.report.tests,
-                        &summary.filter,
+                        &crate::coverage::grid::Facts {
+                            property: &self.name,
+                            seed: self.seed,
+                            tests: self.report.tests,
+                            filter: &summary.filter,
+                            property_type: self.coverage.property_type,
+                        },
                         &summary.targets,
                         &samples,
                     );
@@ -2601,6 +2610,12 @@ mod tests {
         let data: serde_json::Value =
             serde_json::from_str(json_text).expect("embedded JSON parses");
         assert_eq!(data["property"], "grid::branchy");
+        let property_fn = data["property_fn"].as_str().unwrap_or_default();
+        assert!(
+            property_fn
+                .starts_with("crabcheck::runner::tests::the_coverage_grid_is_written::{closure#"),
+            "{property_fn}"
+        );
         assert!(
             data["files"].as_array().unwrap().iter().any(|f| {
                 f["functions"].as_array().unwrap().iter().any(|func| {

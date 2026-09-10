@@ -74,9 +74,11 @@
 //! the `targets.jsonl` line
 //! for the selection and a brief describing the target, its current
 //! coverage and what the generator produces, to hand to whoever rewrites
-//! the generator. Needs the `json` feature. With the `serve` feature,
-//! `crabcheck serve` shows these pages live and adds the selection to
-//! `targets.jsonl` with one click (see [`crate::serve`]).
+//! the generator. The property's own function is pinned at the top of the
+//! tree. Needs the `json` feature. With the `serve` feature,
+//! `crabcheck serve` shows these pages live, adds the selection to
+//! `targets.jsonl` with one click and runs the property again (see the
+//! `serve` module).
 //!
 //! # Regions and branches
 //!

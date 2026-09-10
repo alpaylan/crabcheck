@@ -150,8 +150,10 @@ The full list is in the `config` module documentation.
   counts, the targets and sampled inputs, where a line range becomes a
   new target and a brief for the agent.
 - `serve`: the `crabcheck serve` command, a local page over `.crabcheck`
-  (grid pages, latest reports, targets) with live reload and an
-  "Add to targets.jsonl" button on served grid pages.
+  (grid pages, latest reports, targets, discovered tests) that runs any
+  property or test on request with `cargo` on an instrumented build,
+  streams the output, and refreshes the pages as they are written; served
+  grid pages gain "Run" and "Add to targets.jsonl" buttons.
   Uninstrumented builds compile the same API to no-ops. Run coverage-using
   suites with `RUST_TEST_THREADS=1` for exact attribution, and point
   `LLVM_PROFILE_FILE` into the target directory (see the `coverage` module

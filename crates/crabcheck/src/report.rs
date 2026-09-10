@@ -197,6 +197,55 @@ pub struct TargetSummary {
     pub best_debug: String,
 }
 
+/// How a run was started, read from the environment cargo gives a test or
+/// example when it runs it: enough for `crabcheck serve` to run the same
+/// property again with `cargo test -p <package> --tests -- <test> --exact`
+/// or `cargo run -p <package> --example <target>`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "json", derive(serde::Serialize, serde::Deserialize))]
+pub struct RunSpec {
+    /// The package (`CARGO_PKG_NAME`).
+    pub package: Option<String>,
+    /// `test` for a test binary (unit or integration tests), `example` for
+    /// an example.
+    pub kind: String,
+    /// The binary's name: the example's name or the test crate's name.
+    pub target: Option<String>,
+    /// The test's path inside the binary (`module::test_fn`), when the run
+    /// happened under the test harness.
+    pub test: Option<String>,
+}
+
+impl RunSpec {
+    /// Read from the running process; `None` outside cargo.
+    pub fn current() -> Option<RunSpec> {
+        let package = std::env::var("CARGO_PKG_NAME").ok()?;
+        let exe = std::env::current_exe().ok()?;
+        let parent = exe.parent().and_then(|p| p.file_name()).and_then(|n| n.to_str())?;
+        let stem = exe.file_stem()?.to_str()?;
+        // `deps/reports-3f2a…` carries a metadata hash; `examples/bst` does not.
+        let name = match stem.rsplit_once('-') {
+            Some((name, hash))
+                if hash.len() == 16 && hash.bytes().all(|b| b.is_ascii_hexdigit()) =>
+            {
+                name
+            },
+            _ => stem,
+        };
+        let kind = if parent == "examples" { "example" } else { "test" };
+        let test = (kind == "test")
+            .then(|| std::thread::current().name().map(str::to_string))
+            .flatten()
+            .filter(|t| t != "main" && !t.is_empty());
+        Some(RunSpec {
+            package: Some(package),
+            kind: kind.to_string(),
+            target: Some(name.to_string()),
+            test,
+        })
+    }
+}
+
 /// The outcome of a run of [`check`](crate::check).
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "json", derive(serde::Serialize))]
@@ -268,6 +317,10 @@ pub struct Report {
     pub profraw: Option<PathBuf>,
     /// Path of the coverage grid page, when `Config::coverage.html` is set.
     pub coverage_html: Option<PathBuf>,
+    /// How this run was started, when it ran under cargo, so a tool such as
+    /// `crabcheck serve` can run the same property again.
+    #[cfg_attr(feature = "json", serde(default, skip_serializing_if = "Option::is_none"))]
+    pub run: Option<RunSpec>,
     /// Labels registered with [`cover`](crate::cover) and the share of passing
     /// tests that carried each.
     pub covers: BTreeMap<String, f64>,
@@ -313,6 +366,7 @@ impl Report {
             locate: None,
             profraw: None,
             coverage_html: None,
+            run: None,
             covers: BTreeMap::new(),
             labels: BTreeMap::new(),
             sizes: BTreeMap::new(),
@@ -356,7 +410,7 @@ fn millis(d: Duration) -> String {
 }
 
 /// A UTC timestamp (`YYYY-MM-DD HH:MM UTC`) from seconds since the epoch.
-#[cfg(any(feature = "serve", all(feature = "coverage", feature = "json")))]
+#[cfg(all(feature = "coverage", feature = "json"))]
 pub(crate) fn civil_time(secs: u64) -> String {
     // Civil date from days since the epoch (Howard Hinnant's algorithm).
     let days = (secs / 86_400) as i64;

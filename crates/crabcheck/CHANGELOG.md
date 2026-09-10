@@ -107,11 +107,25 @@ library verifies them and makes every failure reproducible from its seed.
 - `crabcheck serve` (feature `serve`; `cargo install crabcheck --features
   serve`, or `cargo run --features serve --bin crabcheck -- serve`): a
   local page over `.crabcheck`: the coverage grid pages, the latest
-  report per property from `reports.jsonl`, and `targets.jsonl`. Served
-  grid pages gain an "Add to targets.jsonl" button and every page reloads
-  when the files change, closing the loop of pick a region, add it as a
-  target, rerun (or let an agent rewrite the generator), see the outcome.
-  Standard-library HTTP on 127.0.0.1 only; it never runs commands.
+  report per property from `reports.jsonl`, `targets.jsonl`, and the
+  tests it discovers (`cargo test --no-run --message-format=json` plus
+  `--list`, into `tests.json`). Any property or test runs from the page:
+  the server starts `cargo test -p <package> --tests -- <test> --exact`
+  or `cargo run -p <package> --example <name>` with `-C
+  instrument-coverage`, `CARGO_TARGET_DIR=target/cov`,
+  `RUST_TEST_THREADS=1` and the coverage outputs pointed at the
+  directory, one run at a time, streaming the output; the pages and
+  reports refresh as the run writes them. `--cargo-args`,
+  `--no-instrument` and `--target-dir` adjust the runs. Served grid
+  pages gain "Run" and "Add to targets.jsonl" buttons, closing the loop
+  of pick a region, add it as a target, rewrite the generator (or let an
+  agent do it), run, see the outcome. Standard-library HTTP on 127.0.0.1
+  only; cross-site requests are refused; the only thing it starts is
+  `cargo`.
+- `Report.run` (`RunSpec`): which package, target kind (`test` or
+  `example`), binary and test path produced the report, read from the
+  environment cargo gives a running test, so a tool can run the same
+  property again.
 - Fault localization in core (`Config::locate`, on by default when
   coverage is collected): the coverage mapping (`__llvm_covmap` and
   `__llvm_covfun`, versions 4 to 7) is read from the running executable,

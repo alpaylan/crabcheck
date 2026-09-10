@@ -616,6 +616,12 @@ expression: "serde_json::to_string_pretty(&report).expect(\"report serializes\")
   },
   "profraw": null,
   "coverage_html": null,
+  "run": {
+    "package": "crabcheck",
+    "kind": "test",
+    "target": "reports",
+    "test": "instrumented::coverage_lines"
+  },
   "covers": {},
   "labels": {},
   "sizes": {

@@ -28,10 +28,9 @@ cargo run -p crabcheck --example sort_performance        # see the targeted phas
 cargo test -p crabcheck --test reports                    # report snapshots; review drift with `cargo insta review`
 RUSTFLAGS="-C instrument-coverage" RUST_TEST_THREADS=1 cargo test -p crabcheck --features coverage   # instrumented mode
 ci/package-smoke.sh                                       # build and test a consumer against the packaged crates
-# the coverage loop: instrumented run writing pages and reports, then the local server
-CRABCHECK_COVERAGE_HTML=.crabcheck/coverage CRABCHECK_REPORT_JSON=.crabcheck/reports.jsonl \
-  RUSTFLAGS="-C instrument-coverage" RUST_TEST_THREADS=1 cargo test -p crabcheck --features coverage
-cargo run -p crabcheck --features serve --bin crabcheck -- serve   # http://127.0.0.1:7878/
+# the coverage loop: the local server discovers tests, runs them instrumented and shows the pages
+cargo run -p crabcheck --features serve --bin crabcheck -- serve --cargo-args "--features coverage"
+# then open http://127.0.0.1:7878/ and press "Discover tests" or "Run all"; runs land in .crabcheck/
 ```
 
 The report text and JSON are snapshot-tested under `crates/crabcheck/tests/reports/`;

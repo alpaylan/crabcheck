@@ -1,6 +1,8 @@
-//! The `crabcheck` command. `crabcheck serve [--dir DIR] [--port PORT]`
-//! serves the coverage grid pages, reports and targets a test run leaves
-//! under DIR (default `.crabcheck`) at http://127.0.0.1:PORT/ (default 7878).
+//! The `crabcheck` command. `crabcheck serve [--dir DIR] [--port PORT]
+//! [--cargo-args "…"] [--no-instrument] [--target-dir DIR]` serves the
+//! coverage grid pages, reports and targets a test run leaves under DIR
+//! (default `.crabcheck`) at http://127.0.0.1:PORT/ (default 7878), and
+//! runs `cargo` for the property or test picked on the page.
 
 use std::path::PathBuf;
 
@@ -18,10 +20,14 @@ fn main() {
 
 fn usage(code: i32) -> ! {
     eprintln!(
-        "usage: crabcheck serve [--dir DIR] [--port PORT]\n\n\
+        "usage: crabcheck serve [--dir DIR] [--port PORT] [--cargo-args ARGS] [--no-instrument] [--target-dir DIR]\n\n\
          Serves DIR/coverage/*.html (written by CRABCHECK_COVERAGE_HTML=DIR/coverage),\n\
-         DIR/reports.jsonl (CRABCHECK_REPORT_JSON) and DIR/targets.jsonl on 127.0.0.1:PORT.\n\
-         DIR defaults to .crabcheck and PORT to 7878."
+         DIR/reports.jsonl (CRABCHECK_REPORT_JSON), DIR/targets.jsonl and DIR/tests.json on\n\
+         127.0.0.1:PORT, and runs cargo for the property or test picked on the page.\n\
+         DIR defaults to .crabcheck and PORT to 7878. Start it inside the workspace.\n\n\
+         --cargo-args ARGS   extra arguments for every cargo run, e.g. \"--features coverage\"\n\
+         --no-instrument     do not append -C instrument-coverage to RUSTFLAGS\n\
+         --target-dir DIR    CARGO_TARGET_DIR for the runs (default: the environment's, else target/cov)"
     );
     std::process::exit(code);
 }
@@ -45,6 +51,18 @@ fn serve(args: &[String]) {
                 };
                 i += 2;
             },
+            "--cargo-args" if i + 1 < args.len() => {
+                options.cargo_args.extend(args[i + 1].split_whitespace().map(String::from));
+                i += 2;
+            },
+            "--target-dir" if i + 1 < args.len() => {
+                options.target_dir = Some(PathBuf::from(&args[i + 1]));
+                i += 2;
+            },
+            "--no-instrument" => {
+                options.instrument = false;
+                i += 1;
+            },
             other => {
                 eprintln!("unknown argument `{other}`");
                 usage(2);
@@ -52,6 +70,8 @@ fn serve(args: &[String]) {
         }
     }
     let dir = options.dir.clone();
+    let cargo_args = options.cargo_args.join(" ");
+    let instrument = options.instrument;
     let server = match crabcheck::serve::start(options) {
         Ok(server) => server,
         Err(e) => {
@@ -71,6 +91,13 @@ fn serve(args: &[String]) {
         dir.display()
     );
     println!("  targets {}/targets.jsonl     (read by the next run)", dir.display());
+    println!("  tests   {}/tests.json        (written by \"Discover tests\")", dir.display());
+    println!(
+        "  runs    cargo {}{} from {}",
+        if cargo_args.is_empty() { "…".to_string() } else { format!("… {cargo_args}") },
+        if instrument { " with -C instrument-coverage" } else { "" },
+        std::env::current_dir().map_or("here".to_string(), |d| d.display().to_string())
+    );
     println!("Press Ctrl-C to stop.");
     loop {
         std::thread::park();

@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>crabcheck serve</title>
+<style>
+:root { --bg:#f4f5f8; --panel:#fff; --ink:#1b2330; --muted:#69737f; --line:#dfe3ea; --accent:#2f6fed; --accent-rgb:47,111,237; --good:#299d4a; --bad:#d63131; --warn:#d97706; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+@media (prefers-color-scheme: dark) { :root { --bg:#11151b; --panel:#181d25; --ink:#e4e8ee; --muted:#96a1b0; --line:#2a3240; --accent:#7ea3ff; --accent-rgb:126,163,255; --good:#4cbe68; --bad:#eb5454; --warn:#f0a24d; } }
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin:0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--ink); font-size: 14px; }
+header { padding: 12px 20px; border-bottom: 1px solid var(--line); background: var(--panel); display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+h1 { font-size: 15px; margin: 0; font-weight: 650; } h1 code, td code, li code, .cmd { font-family: var(--mono); font-weight: 500; }
+header .right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+main { max-width: 1180px; margin: 0 auto; padding: 20px; display: grid; gap: 20px; }
+section { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 14px 16px; }
+h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0 0 10px; display: flex; align-items: center; gap: 10px; }
+h2 .n { font-weight: 500; text-transform: none; letter-spacing: 0; }
+table { border-collapse: collapse; width: 100%; } th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; vertical-align: middle; } th { color: var(--muted); font-weight: 500; font-size: 12px; }
+td.act { text-align: right; white-space: nowrap; }
+a { color: var(--accent); } .muted { color: var(--muted); }
+.s-failed, .s-gaveup, .s-timedout, .s-aborted { color: var(--bad); font-weight: 600; } .s-passed { color: var(--good); }
+ul { margin: 0; padding-left: 18px; } li { margin: 4px 0; }
+button { font: inherit; font-size: 13px; padding: 5px 10px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 4px; cursor: pointer; }
+button:hover { border-color: var(--accent); } button:disabled { opacity: .5; cursor: default; }
+button.small { font-size: 12px; padding: 2px 8px; }
+.chip { font-size: 12px; padding: 2px 8px; border-radius: 10px; border: 1px solid var(--line); color: var(--muted); }
+.chip.running { border-color: var(--warn); color: var(--warn); }
+.chip.ok { border-color: var(--good); color: var(--good); }
+.chip.failed { border-color: var(--bad); color: var(--bad); }
+p.how { color: var(--muted); font-size: 13px; margin: 8px 0 0; } p.how code { font-family: var(--mono); }
+pre#log { font-family: var(--mono); font-size: 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 10px; margin: 0; max-height: 360px; overflow: auto; white-space: pre-wrap; word-break: break-all; }
+.cmd { color: var(--muted); font-size: 12px; margin-bottom: 8px; word-break: break-all; }
+.group { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+#notice { color: var(--bad); font-size: 13px; }
+</style></head>
+<body>
+<header><h1>crabcheck serve · <code>__CRABCHECK_DIR__</code></h1>
+  <span id="chip" class="chip">idle</span><span id="notice"></span>
+  <div class="right"><button id="discover">Discover tests</button><button id="runall">Run all</button></div>
+</header>
+<main>
+<section><h2>Properties <span class="n muted" id="prop-count"></span></h2>
+<table><thead><tr><th>property</th><th>status</th><th>tests</th><th>coverage</th><th>warnings</th><th>page written</th><th></th></tr></thead><tbody id="props"></tbody></table>
+<p class="how">Reports come from <code>reports.jsonl</code> (<code>CRABCHECK_REPORT_JSON</code>); pages from <code>coverage/</code> (<code>CRABCHECK_COVERAGE_HTML</code>). Runs started here write both.</p>
+</section>
+<section><h2>Tests <span class="n muted" id="test-count"></span></h2>
+<table><thead><tr><th>test</th><th>binary</th><th>last report</th><th></th></tr></thead><tbody id="tests"></tbody></table>
+<p class="how">"Discover tests" builds the test binaries (<code>cargo test --no-run</code>) and lists what they contain into <code>tests.json</code>. A test that calls crabcheck gets a report and a page when it runs.</p>
+</section>
+<section><h2>Targets in <code>targets.jsonl</code></h2><ul id="targets"></ul>
+<p class="how">The next run steers toward these and reports whether each was reached. An agent watching the file can rewrite the generator first.</p>
+<p><button id="clear">Clear targets</button></p>
+</section>
+<section><h2>Run log <span class="n muted" id="log-title"></span></h2><div class="cmd" id="cmd"></div><pre id="log">no run yet</pre></section>
+</main>
+<script>
+(function () {
+  var state = null, log = null;
+  function esc(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
+  function civil(secs) { if (!secs) return "–"; var d = new Date(secs * 1000); return d.toISOString().slice(0, 16).replace("T", " ") + " UTC"; }
+  function post(path, body) {
+    return fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, body: j }; }); })
+      .then(function (r) { document.getElementById("notice").textContent = r.ok ? "" : (r.body && r.body.error) || ("request failed (" + r.status + ")"); if (r.ok) { loadLog(); load(); } return r; })
+      .catch(function () { document.getElementById("notice").textContent = "could not reach the server"; });
+  }
+  function running() { return !!(state && state.run && state.run.running); }
+  function runButton(payload, label) { return '<button class="small" data-run="' + esc(JSON.stringify(payload)) + '"' + (running() ? " disabled" : "") + '>' + (label || "Run") + "</button>"; }
+  function render() {
+    if (!state) return;
+    var props = "";
+    state.pages.forEach(function (p) {
+      var r = p.report || {}, c = r.coverage;
+      var status = r.status || "–";
+      props += "<tr><td><a href=\"" + esc(p.page) + "\">" + esc(p.name) + "</a></td><td class=\"s-" + esc(String(status).toLowerCase()) + "\">" + esc(status) + "</td>" +
+        "<td>" + (r.tests != null ? r.tests + (r.unique_tests != null ? " (" + r.unique_tests + " distinct)" : "") : "–") + "</td>" +
+        "<td>" + (c ? c.functions_reached + " of " + c.functions_total + " functions" : "–") + "</td>" +
+        "<td>" + (r.health ? r.health.length : 0) + "</td><td>" + civil(p.modified) + "</td>" +
+        "<td class=\"act\">" + (r.run ? runButton({ name: p.name }) : '<span class="muted" title="the report does not say how it was run">–</span>') + "</td></tr>";
+    });
+    if (!props) props = '<tr><td colspan="7" class="muted">No coverage pages yet. Press "Discover tests" and run one, or run the tests with <code>CRABCHECK_COVERAGE_HTML</code> on an instrumented build.</td></tr>';
+    document.getElementById("props").innerHTML = props;
+    document.getElementById("prop-count").textContent = state.pages.length ? state.pages.length + " with pages" : "";
+    var tests = "", count = 0;
+    state.tests.forEach(function (t) {
+      var binary = '<span class="group">' + esc(t.package + " · " + t.kind + " " + t.target) + "</span>";
+      if (t.kind === "example") {
+        tests += "<tr><td><code>" + esc(t.target) + "</code> <span class=\"muted\">(example)</span></td><td>" + binary + "</td><td class=\"muted\">–</td><td class=\"act\">" + runButton({ package: t.package, kind: "example", target: t.target }) + "</td></tr>";
+        return;
+      }
+      t.tests.forEach(function (name) {
+        count++;
+        var r = state.reports[name];
+        var last = r ? '<a href="/grid/' + esc(name.replace(/[^A-Za-z0-9_.-]/g, "_")) + '.html" class="s-' + esc(String(r.status).toLowerCase()) + '">' + esc(r.status) + "</a>" : '<span class="muted">none</span>';
+        tests += "<tr><td><code>" + esc(name) + "</code></td><td>" + binary + "</td><td>" + last + "</td><td class=\"act\">" + runButton({ package: t.package, kind: "test", target: t.target, test: name }) + "</td></tr>";
+      });
+    });
+    if (!tests) tests = '<tr><td colspan="4" class="muted">Nothing discovered yet.</td></tr>';
+    document.getElementById("tests").innerHTML = tests;
+    document.getElementById("test-count").textContent = count ? count + " tests" : "";
+    var targets = "";
+    state.targets.forEach(function (t) { targets += "<li><code>" + esc(t.file + ":" + t.begin_line + (t.end_line !== t.begin_line ? "-" + t.end_line : "")) + "</code></li>"; });
+    document.getElementById("targets").innerHTML = targets || '<li class="muted">none; open a page and select lines to add one.</li>';
+    var chip = document.getElementById("chip"), run = state.run;
+    chip.className = "chip" + (run ? (run.running ? " running" : run.status === 0 ? " ok" : " failed") : "");
+    chip.textContent = run ? (run.running ? "running " + run.name : (run.status === 0 ? "finished " : "failed ") + run.name) : "idle";
+    document.getElementById("runall").disabled = running();
+    document.getElementById("discover").disabled = running();
+  }
+  function renderLog() {
+    var pre = document.getElementById("log");
+    if (!log) { pre.textContent = "no run yet"; return; }
+    var stick = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 8;
+    document.getElementById("cmd").textContent = log.command;
+    document.getElementById("log-title").textContent = log.name + (log.running ? " · running" : " · " + (log.status === 0 ? "ok" : "exit " + log.status));
+    pre.textContent = (log.dropped ? "… " + log.dropped + " earlier lines dropped\n" : "") + log.lines.join("\n");
+    if (stick || log.running) pre.scrollTop = pre.scrollHeight;
+  }
+  function load() { fetch("/api/state", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (s) { state = s; render(); }).catch(function () {}); }
+  function loadLog() { fetch("/api/run", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (l) { log = l; renderLog(); }).catch(function () {}); }
+  document.addEventListener("click", function (e) {
+    var b = e.target.closest("button[data-run]");
+    if (b) { post("/api/run", JSON.parse(b.getAttribute("data-run"))); }
+  });
+  document.getElementById("runall").onclick = function () { post("/api/run", {}); };
+  document.getElementById("discover").onclick = function () { post("/api/discover", {}); };
+  document.getElementById("clear").onclick = function () { post("/api/targets/clear", {}); };
+  try { new EventSource("/api/events").onmessage = function (e) { if (e.data === "run") { loadLog(); load(); } else load(); }; } catch (e) {}
+  load(); loadLog();
+})();
+</script>
+</body></html>

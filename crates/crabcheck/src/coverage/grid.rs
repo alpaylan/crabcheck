@@ -20,6 +20,16 @@ use super::{
     targets::TargetOutcome,
 };
 
+/// What the page says about the run it shows.
+pub(crate) struct Facts<'a> {
+    pub property: &'a str,
+    pub seed: u64,
+    pub tests: u64,
+    pub filter: &'a str,
+    /// `type_name` of the property, used to point at its function.
+    pub property_type: &'a str,
+}
+
 /// Per-line accumulation over a run for the selected functions.
 pub(crate) struct Grid {
     selected: Vec<usize>,
@@ -83,16 +93,24 @@ impl Grid {
     /// Render the page. `samples` are `(debug, origin, size)`.
     pub fn render(
         &self,
-        property: &str,
-        seed: u64,
-        tests: u64,
-        filter: &str,
+        facts: &Facts<'_>,
         targets: &[TargetOutcome],
         samples: &[(String, String, usize)],
     ) -> String {
         use serde_json::json;
         let mapping = Mapping::get();
         let all = Functions::get().all();
+        let property_fn = self
+            .selected
+            .iter()
+            .filter(|&&fi| is_property_fn(&all[fi].name, facts.property_type))
+            .max_by_key(|&&fi| {
+                (
+                    all[fi].name.ends_with("::__crabcheck_property"),
+                    self.entered.get(&fi).copied().unwrap_or(0),
+                )
+            })
+            .map(|&fi| all[fi].name.clone());
         let mut files: BTreeMap<usize, Vec<serde_json::Value>> = BTreeMap::new();
         let mut reached = 0usize;
         if let Some(mapping) = mapping {
@@ -165,12 +183,13 @@ impl Grid {
             })
             .collect();
         let data = json!({
-            "property": property,
-            "seed": seed,
-            "tests": tests,
+            "property": facts.property,
+            "seed": facts.seed,
+            "tests": facts.tests,
             "inputs": self.inputs,
-            "filter": filter,
+            "filter": facts.filter,
             "functions_reached": reached,
+            "property_fn": property_fn,
             "generated": timestamp(),
             "files": files_json,
             "targets": targets_json,
@@ -179,7 +198,7 @@ impl Grid {
         let payload = data.to_string().replace("</", "<\\/");
         include_str!("grid.html").replacen("__CRABCHECK_DATA__", &payload, 1).replacen(
             "<title>crabcheck coverage</title>",
-            &format!("<title>crabcheck coverage: {}</title>", escape(property)),
+            &format!("<title>crabcheck coverage: {}</title>", escape(facts.property)),
             1,
         )
     }
@@ -191,6 +210,21 @@ impl Grid {
         std::fs::write(&path, html)?;
         Ok(path)
     }
+}
+
+/// Whether a tracked function is the property itself: the function named
+/// by its `type_name`, a closure of that path (`type_name` says
+/// `{{closure}}` without the index), or the body `#[crabcheck::test]`
+/// nests inside the test function.
+fn is_property_fn(name: &str, property_type: &str) -> bool {
+    let Some(prefix) = property_type.strip_suffix("::{{closure}}") else {
+        return name == property_type;
+    };
+    let Some(rest) = name.strip_prefix(prefix).and_then(|rest| rest.strip_prefix("::")) else {
+        return false;
+    };
+    rest == "__crabcheck_property"
+        || (rest.starts_with("{closure#") && rest.ends_with('}') && !rest.contains("::"))
 }
 
 /// The path of a function name: everything before its last `::`.
@@ -235,6 +269,21 @@ fn file_stem(name: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_property_function_is_recognised() {
+        use super::is_property_fn;
+        let closure = "bst::main::{{closure}}";
+        assert!(is_property_fn("bst::main::{closure#4}", closure));
+        assert!(!is_property_fn("bst::main::{closure#4}::{closure#0}", closure));
+        assert!(!is_property_fn("bst::main", closure));
+        assert!(!is_property_fn("bst::main_2::{closure#0}", closure));
+        let test = "my_crate::tests::sorted::{{closure}}";
+        assert!(is_property_fn("my_crate::tests::sorted::__crabcheck_property", test));
+        assert!(is_property_fn("my_crate::tests::sorted::{closure#0}", test));
+        assert!(is_property_fn("my_crate::props::sorted", "my_crate::props::sorted"));
+        assert!(!is_property_fn("my_crate::props::sorted_by", "my_crate::props::sorted"));
+    }
+
     use super::*;
 
     #[test]

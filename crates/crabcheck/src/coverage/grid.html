@@ -32,6 +32,13 @@ nav .tools { display: flex; align-items: center; gap: 8px; font-size: 12px; colo
 .row:hover, .row.selected { background: rgba(var(--accent-rgb), .12); }
 .row .name { font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row.dir .name { font-weight: 600; }
+.badge { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--accent); border: 1px solid var(--accent); border-radius: 3px; padding: 0 4px; margin: 0 6px 0 0; vertical-align: 1px; }
+.cell .lab .badge { margin: 0 0 0 6px; }
+#logbox { border-top: 1px solid var(--line); margin-top: 10px; padding-top: 6px; flex: none; }
+#logbox summary { cursor: pointer; font-size: 12px; color: var(--muted); }
+#logbox summary b { color: var(--ink); font-weight: 600; }
+#logbox pre { font-family: var(--mono); font-size: 11.5px; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 8px; margin: 6px 0 0; max-height: 220px; overflow: auto; white-space: pre-wrap; word-break: break-all; }
+#notice { color: rgb(var(--cov0-rgb)); font-size: 12px; }
 .caret { color: var(--muted); font-size: 10px; text-align: center; user-select: none; }
 .caret.leaf { visibility: hidden; }
 .bar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; }
@@ -94,6 +101,7 @@ button:hover { border-color: var(--accent); }
   <div class="facts" id="facts"></div>
   <div class="right">
     <div class="seg" id="views"><button data-view="map" class="on">Map</button><button data-view="source">Source</button></div>
+    <button id="run" hidden>Run</button><span id="notice"></span>
     <a id="home" href="/" hidden>all properties</a>
   </div>
 </header>
@@ -105,6 +113,7 @@ button:hover { border-color: var(--accent); }
   <section>
     <div id="mapwrap"><div class="crumbs" id="crumbs"></div><div id="map"></div></div>
     <div id="source" hidden><div class="empty">Pick a function on the left. Click a line number to select it, shift-click to extend the selection, then turn it into a target on the right.</div></div>
+    <details id="logbox" hidden><summary id="logtitle">run log</summary><pre id="log"></pre></details>
   </section>
   <aside id="focus"></aside>
 </main>
@@ -270,18 +279,29 @@ button:hover { border-color: var(--accent); }
 
   // ---- tree ---------------------------------------------------------------
   var tree = document.getElementById("tree");
+  var propertyFn = functions.findIndex(function (f) { return f.name === data.property_fn; });
+  function badge(c) { return c.fn !== null && c.fn === propertyFn ? '<span class="badge">property</span>' : ""; }
+  function rowHtml(c, depth, label) {
+    var isFn = c.fn !== null, kids = c.order.length > 0;
+    return '<div class="row' + (isFn ? " fn" : " dir") + (isFn && c.fn === selected ? " selected" : "") + '" data-node="' + c.id +
+      '" style="padding-left:' + (6 + depth * 12) + 'px" title="' + esc(c.key + ": " + summary(c)) + '">' +
+      '<span class="caret' + (kids ? "" : " leaf") + '" data-toggle="1">' + (c.open ? "▾" : "▸") + '</span>' +
+      '<span class="name">' + badge(c) + esc(label) + '</span>' +
+      '<span class="bar"><i style="width:' + pct(c.hit, c.total) + ';background:' + fillOf(c) + '"></i></span>' +
+      '<span class="ratio">' + (isFn ? c.hit + "/" + c.total : c.reached + "/" + c.fns) + '</span></div>';
+  }
   function renderTree() {
     var html = "";
+    // The property itself, pinned above the tree it also sits in.
+    if (propertyFn >= 0 && fnNode[propertyFn]) {
+      var pn = fnNode[propertyFn];
+      html += '<div class="k">Property</div>' + rowHtml(pn, 0, functions[propertyFn].name) + '<div class="k">Functions</div>';
+    }
     function rec(node, depth) {
       node.order.forEach(function (k) {
-        var c = node.children[k], isFn = c.fn !== null, kids = c.order.length > 0;
-        html += '<div class="row' + (isFn ? " fn" : " dir") + (isFn && c.fn === selected ? " selected" : "") + '" data-node="' + c.id +
-          '" style="padding-left:' + (6 + depth * 12) + 'px" title="' + esc(c.key + ": " + summary(c)) + '">' +
-          '<span class="caret' + (kids ? "" : " leaf") + '" data-toggle="1">' + (c.open ? "▾" : "▸") + '</span>' +
-          '<span class="name">' + esc(c.label) + '</span>' +
-          '<span class="bar"><i style="width:' + pct(c.hit, c.total) + ';background:' + fillOf(c) + '"></i></span>' +
-          '<span class="ratio">' + (isFn ? c.hit + "/" + c.total : c.reached + "/" + c.fns) + '</span></div>';
-        if (kids && c.open) rec(c, depth + 1);
+        var c = node.children[k];
+        html += rowHtml(c, depth, c.label);
+        if (c.order.length > 0 && c.open) rec(c, depth + 1);
       });
     }
     rec(root, 0);
@@ -446,7 +466,7 @@ button:hover { border-color: var(--accent); }
         var n = c.node, labelled = c.w > 56 && c.h > 22;
         var top = labelled ? 18 : 2, iw = c.w - 6, ih = c.h - top - 4, inner = iw > 20 && ih > 10;
         html += '<div class="cell' + (n.body ? " body" : "") + '" data-' + (n.body ? "body" : "zoom") + '="' + n.id + '" style="' + box(c) + (inner ? "" : ";background:" + fillOf(n)) + '" title="' + esc(n.key + ": " + summary(n)) + '">';
-        if (labelled) html += '<div class="lab"><b>' + esc(n.label) + '</b><span>' + (n.fn !== null ? n.hit + "/" + n.total : n.reached + "/" + n.fns + " fns") + "</span></div>";
+        if (labelled) html += '<div class="lab"><b>' + esc(n.label) + '</b>' + (n.body ? "" : badge(n)) + '<span>' + (n.fn !== null ? n.hit + "/" + n.total : n.reached + "/" + n.fns + " fns") + "</span></div>";
         if (inner) {
           if (n.fn !== null && !n.order.length) html += miniStack(functions[n.fn], 2, top, iw, ih);
           else squarify(items(n), 2, top, iw, ih).forEach(function (t) {
@@ -482,14 +502,34 @@ button:hover { border-color: var(--accent); }
   window.addEventListener("resize", function () { clearTimeout(resizeTimer); resizeTimer = setTimeout(function () { if (view === "map") renderMap(); }, 80); });
 
   // ---- source -------------------------------------------------------------
+  function loadLog() {
+    fetch("/api/run", { cache: "no-store" }).then(function (r) { return r.ok ? r.json() : null; }).then(function (log) {
+      var box = document.getElementById("logbox"), pre = document.getElementById("log");
+      if (!log) { box.hidden = true; return; }
+      box.hidden = false;
+      var stick = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 8;
+      document.getElementById("logtitle").innerHTML = "run log · <b>" + esc(log.name) + "</b> · " + (log.running ? "running" : log.status === 0 ? "finished" : "exit " + log.status);
+      pre.textContent = log.lines.join("\n");
+      if (stick || log.running) pre.scrollTop = pre.scrollHeight;
+      document.getElementById("run").disabled = !!log.running;
+      if (log.running) box.open = true;
+    }).catch(function () {});
+  }
   if (/^https?:$/.test(location.protocol)) {
     fetch("/api/state", { cache: "no-store" }).then(function (r) { return r.ok ? r.json() : null; }).then(function (s) {
       if (!s) return;
       live = true;
       document.getElementById("home").hidden = false;
+      document.getElementById("run").hidden = false;
       renderFocus();
+      loadLog();
     }).catch(function () {});
-    try { new EventSource("/api/events").onmessage = function (e) { if (e.data === "pages") location.reload(); }; } catch (e) {}
+    try { new EventSource("/api/events").onmessage = function (e) { if (e.data === "pages") location.reload(); else if (e.data === "run") loadLog(); }; } catch (e) {}
+    document.getElementById("run").addEventListener("click", function () {
+      fetch("/api/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: data.property }) })
+        .then(function (r) { return r.json().then(function (j) { document.getElementById("notice").textContent = r.ok ? "" : (j && j.error) || ("could not run (" + r.status + ")"); loadLog(); }); })
+        .catch(function () { document.getElementById("notice").textContent = "could not reach the server"; });
+    });
   }
   function renderSource() {
     if (selected === null) return;
