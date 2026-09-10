@@ -20,7 +20,13 @@
 //! - [`Config`] holds every knob; `CRABCHECK_*` variables override it (see
 //!   [`config`]).
 //! - Inside a property, [`label`] and [`classify`] record how inputs are
-//!   distributed and [`target`] steers the search toward high scores.
+//!   distributed, [`cover`] requires a share of inputs to meet a condition
+//!   and [`target`] steers the search toward high scores.
+//! - With the `coverage` feature and `RUSTFLAGS="-C instrument-coverage"`,
+//!   the report says which functions of the crate under test each property
+//!   reached, inputs that reach new code seed the targeted search, and a
+//!   failure comes with the functions ranked by how much their coverage
+//!   separates failing runs from passing ones (see [`coverage`]).
 //!
 //! 0.2 is a rewrite of the 0.1 prototype and its API is not yet frozen.
 //!

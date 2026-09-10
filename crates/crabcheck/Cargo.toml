@@ -20,7 +20,7 @@ json = ["dep:serde", "dep:serde_json"]
 derive = ["dep:crabcheck-macros"]
 # In-process LLVM coverage counters (needs `-C instrument-coverage` on the
 # final build; detected by the build script).
-coverage = ["dep:rustc-demangle", "dep:miniz_oxide"]
+coverage = ["dep:rustc-demangle", "dep:miniz_oxide", "dep:object"]
 # Assume the build is instrumented even when the build script cannot see
 # the flag (profile rustflags, `cargo rustc -- ...`).
 coverage-force = ["coverage"]
@@ -28,6 +28,7 @@ coverage-force = ["coverage"]
 [dependencies]
 rustc-demangle = { version = "0.1", optional = true }
 miniz_oxide = { version = "0.8", optional = true }
+object = { version = "0.40", optional = true, default-features = false, features = ["read", "std"] }
 crabcheck-macros = { version = "0.2.0-dev", path = "../crabcheck-macros", optional = true }
 rand_core = "0.9"
 rand_chacha = "0.9"

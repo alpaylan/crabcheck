@@ -288,6 +288,80 @@ where
     run.finish()
 }
 
+/// Per-run coverage state: the tracker, the fault-localization spectrum and
+/// the signature of the failure being localized.
+#[cfg(feature = "coverage")]
+struct CoverageState {
+    tracker: Option<crate::coverage::tracker::Tracker>,
+    spectrum: Option<crate::coverage::locate::Spectrum>,
+    signature: Option<Signature>,
+}
+
+#[cfg(feature = "coverage")]
+impl CoverageState {
+    fn new() -> Self {
+        CoverageState { tracker: None, spectrum: None, signature: None }
+    }
+
+    fn begin(&self) -> Option<crate::coverage::Snapshot> {
+        self.tracker.as_ref().and_then(|t| t.begin())
+    }
+
+    /// Record what an input did; returns whether it reached new coverage.
+    /// Passing runs and runs failing like the first failure feed the
+    /// spectrum; discards and other failures do not.
+    fn end(
+        &mut self,
+        before: Option<crate::coverage::Snapshot>,
+        result: &Result<Outcome, PanicInfo>,
+    ) -> bool {
+        let (Some(tracker), Some(before)) = (self.tracker.as_mut(), before) else {
+            return false;
+        };
+        let observation = tracker.end(&before);
+        if let Some(spectrum) = self.spectrum.as_mut() {
+            match Signature::of(result) {
+                None => {
+                    if matches!(result, Ok(Outcome::Pass)) {
+                        spectrum.observe(&observation.delta, false);
+                    }
+                },
+                Some(signature) => {
+                    let same = match &self.signature {
+                        Some(first) => *first == signature,
+                        None => {
+                            self.signature = Some(signature);
+                            true
+                        },
+                    };
+                    if same {
+                        spectrum.observe(&observation.delta, true);
+                    }
+                },
+            }
+        }
+        observation.novel
+    }
+}
+
+#[cfg(not(feature = "coverage"))]
+struct CoverageState;
+
+#[cfg(not(feature = "coverage"))]
+impl CoverageState {
+    fn new() -> Self {
+        CoverageState
+    }
+
+    fn begin(&self) -> Option<()> {
+        None
+    }
+
+    fn end(&mut self, _before: Option<()>, _result: &Result<Outcome, PanicInfo>) -> bool {
+        false
+    }
+}
+
 /// The crate a type was defined in, read off its `type_name`: the first
 /// path segment after any reference or pointer sigils.
 #[cfg(feature = "coverage")]
@@ -328,8 +402,7 @@ struct Run<'a, G: Gen, P> {
     seen: HashSet<u64>,
     generated: u64,
     pool: Pool<G::Value>,
-    #[cfg(feature = "coverage")]
-    tracker: Option<crate::coverage::tracker::Tracker>,
+    coverage: CoverageState,
     /// `cover` labels: (times met, times seen) over passing tests.
     covers: BTreeMap<String, (u64, u64)>,
 }
@@ -379,8 +452,7 @@ where
             seen: HashSet::new(),
             generated: 0,
             pool: Pool::new(config.target.pool_size, config.target.energy),
-            #[cfg(feature = "coverage")]
-            tracker: None,
+            coverage: CoverageState::new(),
             covers: BTreeMap::new(),
         }
     }
@@ -424,9 +496,9 @@ where
         };
         self.generated += 1;
         self.seen.insert(debug_hash(&value));
-        let before = self.cov_begin();
+        let before = self.coverage.begin();
         let (result, observed) = self.evaluate(value);
-        let novel = self.cov_end(before);
+        let novel = self.coverage.end(before, &result);
         match result {
             Ok(Outcome::Pass) => {
                 Attempt::Passed {
@@ -464,7 +536,7 @@ where
     fn guided(&self) -> bool {
         #[cfg(feature = "coverage")]
         {
-            self.config.coverage.guided && self.tracker.is_some()
+            self.config.coverage.guided && self.coverage.tracker.is_some()
         }
         #[cfg(not(feature = "coverage"))]
         {
@@ -497,8 +569,23 @@ where
         match crate::coverage::tracker::Tracker::new(&filter) {
             Some(tracker) => {
                 let guard = crate::coverage::lock();
-                self.tracker = Some(tracker);
-                if std::env::var("RUST_TEST_THREADS").ok().as_deref() != Some("1") {
+                if self.config.locate.enabled {
+                    self.coverage.spectrum =
+                        crate::coverage::locate::Spectrum::new(tracker.selected());
+                    if self.coverage.spectrum.is_none() {
+                        self.report.warn(
+                            "locate_unavailable",
+                            "the binary carries no coverage mapping, so failures cannot be localized",
+                        );
+                    }
+                }
+                self.coverage.tracker = Some(tracker);
+                // The test harness runs each test on a thread named after it;
+                // a plain binary runs on `main` and has no sibling tests.
+                let in_test_harness = std::thread::current().name().is_some_and(|n| n != "main");
+                if in_test_harness
+                    && std::env::var("RUST_TEST_THREADS").ok().as_deref() != Some("1")
+                {
                     self.report.warn(
                         "coverage_threads",
                         "coverage is attributed per input, and other test threads running at the same time pollute it; \
@@ -522,28 +609,6 @@ where
         None
     }
 
-    #[cfg(feature = "coverage")]
-    fn cov_begin(&self) -> Option<crate::coverage::Snapshot> {
-        self.tracker.as_ref().and_then(|t| t.begin())
-    }
-
-    #[cfg(feature = "coverage")]
-    fn cov_end(&mut self, before: Option<crate::coverage::Snapshot>) -> bool {
-        match (self.tracker.as_mut(), before) {
-            (Some(tracker), Some(before)) => tracker.end(&before).novel,
-            _ => false,
-        }
-    }
-
-    #[cfg(not(feature = "coverage"))]
-    fn cov_begin(&self) -> Option<()> {
-        None
-    }
-
-    #[cfg(not(feature = "coverage"))]
-    fn cov_end(&mut self, _before: Option<()>) -> bool {
-        false
-    }
 
     /// The random-testing loop. Returns the first failing input, which the
     /// caller hands to [`fail`](Self::fail). `stop` lets parallel workers
@@ -726,9 +791,9 @@ where
             };
             self.generated += 1;
             self.seen.insert(debug_hash(&mutant));
-            let before = self.cov_begin();
+            let before = self.coverage.begin();
             let (result, observed) = self.evaluate(mutant.clone());
-            let novel = self.cov_end(before);
+            let novel = self.coverage.end(before, &result);
             match result {
                 Ok(Outcome::Pass) => {
                     self.record_pass(size, observed.labels, observed.covers);
@@ -785,16 +850,20 @@ where
 
         let mut shrunk = None;
         let mut shrink_stats = None;
+        let mut minimal = found.value.clone();
         if config.shrink.enabled && !flaky {
             let generator = self.generator;
             let property = &mut self.property;
+            let coverage = &mut self.coverage;
             let started = Instant::now();
             let result = shrink::shrink(
                 &config.shrink,
                 found.value.clone(),
                 |value| generator.shrink(value),
                 |candidate| {
+                    let before = coverage.begin();
                     let outcome = evaluate(property, candidate).0;
+                    coverage.end(before, &outcome);
                     (Signature::of(&outcome).as_ref() == Some(&signature)).then(|| {
                         let (_, message, location) = details(outcome);
                         (message, location)
@@ -803,6 +872,7 @@ where
                 |value| render(value, limit),
             );
             self.report.prop_time += started.elapsed();
+            minimal = result.value.clone();
             if let Some((shrunk_message, shrunk_location)) = result.failure {
                 let (debug, truncated, _) = render(&result.value, limit);
                 shrunk = Some(Counterexample {
@@ -827,6 +897,25 @@ where
             }
             shrink_stats = Some(result.stats);
         }
+        #[cfg(feature = "coverage")]
+        if self.coverage.spectrum.is_some() && !flaky {
+            // Passing and failing neighbours of the minimal input sharpen the
+            // spectrum where it matters.
+            let neighbourhood = mix(self.seed, u64::MAX - 3);
+            for i in 0..config.locate.neighbourhood as u64 {
+                let mut source = Source::new(mix(neighbourhood, i), found.size);
+                if let Some(mutant) = self.generator.mutate(&minimal, &mut source) {
+                    let before = self.coverage.begin();
+                    let result = self.evaluate(mutant).0;
+                    self.coverage.end(before, &result);
+                }
+            }
+            let panic = location.as_ref().map(|l| (l.file.as_str(), l.line));
+            self.report.locate =
+                self.coverage.spectrum.as_ref().map(|s| s.rank(panic, config.locate.top));
+        }
+        #[cfg(not(feature = "coverage"))]
+        let _ = minimal;
 
         #[cfg(feature = "json")]
         if config.regressions.save
@@ -894,7 +983,7 @@ where
         }
         #[cfg(feature = "coverage")]
         {
-            if let Some(tracker) = self.tracker.take() {
+            if let Some(tracker) = self.coverage.tracker.take() {
                 let summary = tracker.summary();
                 if summary.inputs >= 100 && !summary.partial.is_empty() {
                     let since = summary.inputs - 1 - summary.last_novelty_at;

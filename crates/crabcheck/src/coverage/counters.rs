@@ -97,8 +97,31 @@ impl Delta {
 pub struct Function {
     /// Demangled name, e.g. `my_crate::module::function`.
     pub name: String,
+    /// Hash of the profile name, the key shared with the coverage mapping.
+    pub name_ref: u64,
+    /// Structural hash of the function, the other half of that key.
+    pub func_hash: u64,
     /// Indices into a [`Snapshot`] of this function's counters.
     pub counters: Range<usize>,
+}
+
+/// Keep the profile runtime from writing `default_<hash>_<pid>.profraw`
+/// into the working directory when this process exits, unless someone
+/// asked for a file by setting `LLVM_PROFILE_FILE` (as `cargo llvm-cov`
+/// does). Opt-in: crabcheck never calls it for you, because a profile
+/// someone else is waiting for would silently vanish. Call it from any test
+/// when the suite is instrumented only for crabcheck's sake; the
+/// `[env]` setting described in the [module docs](crate::coverage) is the
+/// broader fix. A no-op when uninstrumented, and
+/// [`Config::coverage.profraw_dir`](crate::Config) is unaffected.
+pub fn suppress_default_dump() {
+    static DONE: std::sync::Once = std::sync::Once::new();
+    DONE.call_once(|| {
+        let asked = std::env::var_os("LLVM_PROFILE_FILE").is_some_and(|v| !v.is_empty());
+        if !asked {
+            runtime::set_dumped();
+        }
+    });
 }
 
 /// Every instrumented function in the binary, from the profile data records
@@ -158,6 +181,11 @@ pub fn profraw_image() -> Option<Vec<u8>> {
 #[cfg(crabcheck_instrumented)]
 #[allow(unsafe_code)]
 mod runtime {
+    /// Mark the profile as already written so the exit handler skips it.
+    pub fn set_dumped() {
+        unsafe { __llvm_profile_set_dumped() }
+    }
+
     use std::sync::atomic::{
         AtomicU64,
         Ordering,
@@ -166,6 +194,7 @@ mod runtime {
     use super::Function;
 
     unsafe extern "C" {
+        fn __llvm_profile_set_dumped();
         fn __llvm_profile_begin_counters() -> *mut u8;
         fn __llvm_profile_end_counters() -> *mut u8;
         fn __llvm_profile_begin_data() -> *const u8;
@@ -226,6 +255,7 @@ mod runtime {
         let mut functions = Vec::with_capacity(records.len() / RECORD_SIZE);
         for (index, record) in records.chunks_exact(RECORD_SIZE).enumerate() {
             let name_ref = u64::from_le_bytes(record[0..8].try_into().expect("8 bytes"));
+            let func_hash = u64::from_le_bytes(record[8..16].try_into().expect("8 bytes"));
             let counter_ptr = i64::from_le_bytes(record[16..24].try_into().expect("8 bytes"));
             let num_counters =
                 u32::from_le_bytes(record[48..52].try_into().expect("4 bytes")) as usize;
@@ -239,7 +269,12 @@ mod runtime {
                 || format!("<unknown {name_ref:#x}>"),
                 |n| super::super::names::pretty(n),
             );
-            functions.push(Function { name, counters: start..start + num_counters });
+            functions.push(Function {
+                name,
+                name_ref,
+                func_hash,
+                counters: start..start + num_counters,
+            });
         }
         functions.sort_by_key(|f| f.counters.start);
         functions
@@ -248,6 +283,8 @@ mod runtime {
 
 #[cfg(not(crabcheck_instrumented))]
 mod runtime {
+    pub fn set_dumped() {}
+
     use super::Function;
 
     pub(super) fn counters(_range: Option<std::ops::Range<usize>>) -> Option<Vec<u64>> {

@@ -238,6 +238,11 @@ pub struct Report {
     /// instrumented build).
     #[cfg(feature = "coverage")]
     pub coverage: Option<crate::coverage::Summary>,
+    /// Fault localization for a failure: the functions ranked by how much
+    /// their coverage separates failing runs from passing ones (`coverage`
+    /// feature, instrumented build).
+    #[cfg(feature = "coverage")]
+    pub locate: Option<crate::coverage::Locate>,
     /// Path of the profraw written for `llvm-cov`, when requested.
     pub profraw: Option<PathBuf>,
     /// Labels registered with [`cover`](crate::cover) and the share of passing
@@ -275,6 +280,8 @@ impl Report {
             target: None,
             #[cfg(feature = "coverage")]
             coverage: None,
+            #[cfg(feature = "coverage")]
+            locate: None,
             profraw: None,
             covers: BTreeMap::new(),
             labels: BTreeMap::new(),
@@ -508,6 +515,30 @@ impl fmt::Display for Report {
         }
         if let Some(profraw) = &self.profraw {
             writeln!(f, "  profraw written to {}", profraw.display())?;
+        }
+        #[cfg(feature = "coverage")]
+        if let Some(locate) = &self.locate {
+            writeln!(
+                f,
+                "  suspects ({} passing and {} failing runs over {} regions):",
+                locate.passing, locate.failing, locate.regions
+            )?;
+            for s in &locate.suspects {
+                writeln!(
+                    f,
+                    "    {}. {}:{}-{} in `{}`  ochiai={:.2} delta={:.2}  {}{} ({})",
+                    s.rank,
+                    crate::coverage::display_path(&s.file),
+                    s.start_line,
+                    s.end_line,
+                    s.function,
+                    s.scores.ochiai,
+                    s.scores.delta,
+                    s.confidence,
+                    if s.panic_overlap { " panic-site" } else { "" },
+                    s.rule
+                )?;
+            }
         }
         if !self.covers.is_empty() {
             let covers: Vec<String> = self

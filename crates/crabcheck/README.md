@@ -138,15 +138,26 @@ The full list is in the `config` module documentation.
 
 - `json` (default): JSON reports and config, the regressions file.
 - `derive` (default): `#[derive(Arbitrary)]` and `#[crabcheck::test]`.
+- `coverage`: in-process coverage for binaries built with
+  `RUSTFLAGS="-C instrument-coverage"`: per-property coverage in the
+  report, coverage-guided search, `cover()` shares and fault localization
+  (suspect functions ranked from the coverage of passing and failing runs).
+  Uninstrumented builds compile the same API to no-ops. Run coverage-using
+  suites with `RUST_TEST_THREADS=1` for exact attribution, and point
+  `LLVM_PROFILE_FILE` into the target directory (see the `coverage` module
+  docs) so instrumented processes do not leave `default_*.profraw` files
+  behind. On nightly,
+  `-Z coverage-options=branch` adds per-outcome branch counters that the
+  same report and localization use.
 
 Minimum supported Rust version: 1.88.
 
 ## Status
 
 0.2 is a rewrite of the 0.1 research prototype and its API is not yet
-frozen. Coverage-guided search and fault localization are being rebuilt
-on this core; the 0.1 versions live in the `crabcheck-locate` crate in the
-repository.
+frozen. Coverage-guided search and fault localization now live in this
+crate behind the `coverage` feature; the 0.1 file-based pipeline in
+`crates/crabcheck-locate` is superseded and kept only for reference.
 
 ## License
 

@@ -8,6 +8,7 @@ use std::{
 };
 
 use super::counters::{
+    Delta,
     Functions,
     Snapshot,
     snapshot_range,
@@ -51,6 +52,8 @@ pub(crate) struct Tracker {
 
 /// What one input did.
 pub(crate) struct Observation {
+    /// The counters the input incremented.
+    pub delta: Delta,
     /// Whether the input reached a counter, or a hit-count class, never
     /// seen before in this run.
     pub novel: bool,
@@ -92,6 +95,11 @@ impl Tracker {
         })
     }
 
+    /// Indices into [`Functions::all`] of the selected functions.
+    pub fn selected(&self) -> &[usize] {
+        &self.selected
+    }
+
     /// Snapshot the window before running an input.
     pub fn begin(&self) -> Option<Snapshot> {
         snapshot_range(&self.window)
@@ -116,7 +124,7 @@ impl Tracker {
             self.last_novelty_at = self.inputs;
         }
         self.inputs += 1;
-        Observation { novel }
+        Observation { delta, novel }
     }
 
     /// Summary for the report.
@@ -139,7 +147,17 @@ impl Tracker {
             }
         }
         partial.sort_by(|a, b| (b.2 - b.1).cmp(&(a.2 - a.1)).then_with(|| a.0.cmp(&b.0)));
-        let counters_hit = self.touched_by.iter().filter(|c| **c > 0).count();
+        let counters_hit = self
+            .selected
+            .iter()
+            .map(|&i| {
+                all[i]
+                    .counters
+                    .clone()
+                    .filter(|c| self.touched_by[c - self.window.start] > 0)
+                    .count()
+            })
+            .sum();
         let counters_total = self.selected.iter().map(|&i| all[i].counters.len()).sum();
         Summary {
             filter: self.filter.clone(),

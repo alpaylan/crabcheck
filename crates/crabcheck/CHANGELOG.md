@@ -74,11 +74,29 @@ library verifies them and makes every failure reproducible from its seed.
   `coverage_unavailable` when a coverage option is requested in an
   uninstrumented build. `Config::coverage.profraw_dir` writes one
   `.profraw` per property for `llvm-cov`/`cargo llvm-cov`.
+  `coverage::suppress_default_dump` (opt-in) stops the process's own
+  `default_*.profraw` dump at exit; the module docs show the
+  `[env] LLVM_PROFILE_FILE` setting that keeps every profile file, from
+  test binaries and from `rustc` running instrumented proc macros, in the
+  target directory.
 - Coverage-guided search (`Config::coverage.guided`,
   `CRABCHECK_COVERAGE_GUIDED=1`): inputs that reach a counter or a
   hit-count class (AFL buckets) never seen before seed the targeted
   phase's pool, so the value mutators explore from them even when the
   property reports no `target` score.
+- Fault localization in core (`Config::locate`, on by default when
+  coverage is collected): the coverage mapping (`__llvm_covmap` and
+  `__llvm_covfun`, versions 4 to 7) is read from the running executable,
+  every run's counters are turned into region hits, and on failure the
+  passing runs, the shrink trajectory and a mutant neighbourhood of the
+  shrunk input form a pass/fail spectrum. Functions are ranked by Ochiai
+  and count-mean difference with a prior for the function containing the
+  panic site; `Report::locate` carries the suspects with all scores
+  (Tarantula, Ochiai, D*, Jaccard, Op2, delta) and a confidence band, and
+  the report prints the top ones. This replaces the profraw-per-input
+  pipeline of `crabcheck-locate` (seconds per run instead of minutes).
+  Nightly's `-Z coverage-options=branch` adds true/false branch regions
+  that the spectrum scores as separate arms.
 - `cover(condition, label)`: records how often a condition held across
   passing tests; `Report::covers` carries the shares and a `cover`
   warning fires when a label is met by fewer than

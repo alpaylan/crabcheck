@@ -1,64 +1,26 @@
-//! Integration test demonstrating `quickcheck_with_locate!` from `cargo test`.
-//! No env-var setup, no `RUST_TEST_THREADS=1` — the orchestrator handles
-//! per-call workdirs so concurrent tests don't race on `coverage/`.
+//! The planted bug is the top suspect, from an integration test.
 
-// NOTE: integration tests (under `tests/`) are compiled as their own crate
-// named after the file stem (e.g. `locate`), not the package crate. So we
-// pass the explicit module name `"locate_demo"` to the 2-arg form of the
-// macro — `env!("CARGO_CRATE_NAME")` would resolve to `"locate"` here and
-// filter the actual library code out of the suspect list.
+use crabcheck::{
+    Status,
+    coverage::Confidence,
+};
 
 #[test]
-fn finds_planted_overflow_bug() {
-    let report = crabcheck_locate::quickcheck_with_locate!(
-        locate_demo::property_addition_total,
-        "locate_demo"
-    );
-
-    // Print the report to stderr so `cargo test` shows it without `--nocapture`.
+fn the_planted_bug_is_the_top_suspect() {
+    let report = locate_demo::check_addition();
     eprintln!("{report}");
+    assert_eq!(report.status, Status::Failed);
+    let failure = report.failure.as_ref().expect("a failure");
+    let panic = failure.location.as_ref().expect("a panic site");
+    assert!(panic.file.ends_with("src/lib.rs"), "{}", panic.file);
 
-    report.assert_failed();
-    let top = report.top().expect("expected at least one suspect");
-
-    assert!(
-        top.region.file.ends_with("src/lib.rs"),
-        "top suspect should be in src/lib.rs; got {}",
-        top.region.file
-    );
-
-    // The buggy `if x > 100 { panic!(...) }` is on lines ~13-15 of src/lib.rs.
-    // The function body containing the panic spans more than that, so just
-    // require the suspect range to overlap the buggy block.
-    let overlaps_panic_site = top.region.start_line <= 16 && top.region.end_line >= 12;
-    assert!(
-        overlaps_panic_site,
-        "top suspect range {}-{} should overlap the buggy panic site near lines 13-15",
-        top.region.start_line, top.region.end_line
-    );
-
-    // Crash-stack prior should have fired.
-    assert!(
-        top.panic_overlap,
-        "expected the top suspect to be a panic-overlap region (crash-stack prior); panics={}",
-        report.n_panics
-    );
-}
-
-#[test]
-fn parallel_safety_smoke() {
-    // A second test in the same file. `cargo test` runs these in parallel by
-    // default; the orchestrator's process-global mutex ensures concurrent
-    // calls queue cleanly so neither run gets bad data.
-    let report = crabcheck_locate::quickcheck_with_locate!(
-        locate_demo::property_addition_total,
-        "locate_demo"
-    );
-    eprintln!("[parallel_safety_smoke] {report}");
-    report.assert_failed();
-    assert!(
-        report.top().is_some(),
-        "expected suspects from parallel run too (workdir={})",
-        report.workdir.display()
-    );
+    let locate = report.locate.as_ref().expect("localization ran");
+    assert!(locate.passing > 0 && locate.failing > 0, "{locate:?}");
+    let top = &locate.suspects[0];
+    assert!(top.file.ends_with("src/lib.rs"), "{top:?}");
+    assert!(top.function.contains("buggy_addition"), "{top:?}");
+    assert!(top.start_line <= panic.line && panic.line <= top.end_line, "{top:?}");
+    assert!(top.panic_overlap, "{top:?}");
+    assert_eq!(top.confidence, Confidence::High, "{top:?}");
+    assert!(top.scores.ochiai > 0.0, "{top:?}");
 }

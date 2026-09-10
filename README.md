@@ -12,10 +12,10 @@ library's own README and the [changelog](crates/crabcheck/CHANGELOG.md).
 
 | Crate | Purpose | Status |
 |---|---|---|
-| [`crates/crabcheck`](crates/crabcheck) | The library: generators, choice-tree shrinking, targeted mutation, replay tokens, regressions, JSON reports, parallel runs | 0.2 (API not yet frozen) |
+| [`crates/crabcheck`](crates/crabcheck) | The library: generators with verified shrinkers and mutators, targeted and coverage-guided search, seed replay, regressions, JSON reports, parallel runs, in-process coverage and fault localization | 0.2 (API not yet frozen) |
 | [`crates/crabcheck-macros`](crates/crabcheck-macros) | `#[derive(Arbitrary)]` and `#[crabcheck::test]`, re-exported by `crabcheck` | 0.2 |
-| [`crates/crabcheck-locate`](crates/crabcheck-locate) | Coverage-guided fault localization (the 0.1 research code) | Unpublished; to be ported onto the 0.2 core |
-| [`examples/locate-demo`](examples/locate-demo) | Standalone example of the fault-localization flow | Builds against `crabcheck-locate` |
+| [`crates/crabcheck-locate`](crates/crabcheck-locate) | The 0.1 file-based fault-localization pipeline | Superseded by `crabcheck`'s `coverage` feature; kept for reference, unpublished |
+| [`examples/locate-demo`](examples/locate-demo) | Standalone example of fault localization on the 0.2 core | Builds against `crabcheck` with `-C instrument-coverage` |
 
 ## Developing
 

@@ -42,6 +42,9 @@
 //! | `CRABCHECK_COVERAGE_GUIDED` | `coverage.guided` |
 //! | `CRABCHECK_PROFRAW_DIR` | `coverage.profraw_dir` |
 //! | `CRABCHECK_MIN_COVER` | `coverage.min_cover` |
+//! | `CRABCHECK_LOCATE` | `locate.enabled` |
+//! | `CRABCHECK_LOCATE_NEIGHBOURHOOD` | `locate.neighbourhood` |
+//! | `CRABCHECK_LOCATE_TOP` | `locate.top` |
 //! | `CRABCHECK_REGRESSIONS` | `regressions.save` and `regressions.replay` |
 //! | `CRABCHECK_REGRESSIONS_DIR` | `regressions.dir` |
 //! | `CRABCHECK_TRUNCATE_DEBUG_AT` | `report.truncate_debug_at` |
@@ -127,6 +130,8 @@ pub struct Config {
     /// Coverage collection (needs the `coverage` feature and an instrumented
     /// build).
     pub coverage: CoverageConfig,
+    /// Fault localization on failure (needs coverage).
+    pub locate: LocateConfig,
     /// Remembered failures.
     pub regressions: RegressionsConfig,
     /// Report rendering.
@@ -201,6 +206,31 @@ impl Default for CoverageConfig {
     }
 }
 
+/// Spectrum-based fault localization: when a property fails, the coverage
+/// of every run (passing inputs, the shrink trajectory and a mutant
+/// neighbourhood of the shrunk input) ranks the functions of the crate
+/// under test by how much they separate failing runs from passing ones.
+/// Needs the `coverage` feature and an instrumented build.
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "json", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "json", serde(default))]
+pub struct LocateConfig {
+    /// Localize failures. Default true (a no-op when coverage is not
+    /// collected).
+    pub enabled: bool,
+    /// How many mutants of the shrunk input to run for the spectrum.
+    /// Default 64.
+    pub neighbourhood: usize,
+    /// How many suspects to report. Default 10.
+    pub top: usize,
+}
+
+impl Default for LocateConfig {
+    fn default() -> Self {
+        LocateConfig { enabled: true, neighbourhood: 64, top: 10 }
+    }
+}
+
 /// Where and whether failing inputs are remembered (needs the `json`
 /// feature; without it both flags are ignored).
 #[derive(Clone, Debug, PartialEq)]
@@ -244,6 +274,7 @@ impl Default for Config {
             shrink: ShrinkConfig::default(),
             target: TargetConfig::default(),
             coverage: CoverageConfig::default(),
+            locate: LocateConfig::default(),
             regressions: RegressionsConfig::default(),
             report: ReportConfig::default(),
         }
@@ -504,6 +535,19 @@ impl Config {
                     parse("a number", &mut |v| {
                         v.parse().map(|n| self.coverage.min_cover = n).is_ok()
                     })
+                },
+                "CRABCHECK_LOCATE" => {
+                    parse("0/1/true/false", &mut |v| {
+                        parse_bool(v).map(|b| self.locate.enabled = b).is_some()
+                    })
+                },
+                "CRABCHECK_LOCATE_NEIGHBOURHOOD" => {
+                    parse("an integer", &mut |v| {
+                        v.parse().map(|n| self.locate.neighbourhood = n).is_ok()
+                    })
+                },
+                "CRABCHECK_LOCATE_TOP" => {
+                    parse("an integer", &mut |v| v.parse().map(|n| self.locate.top = n).is_ok())
                 },
                 "CRABCHECK_REGRESSIONS" => {
                     parse("0/1/true/false", &mut |v| {
