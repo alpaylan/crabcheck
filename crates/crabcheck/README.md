@@ -224,6 +224,9 @@ The full list is in the `config` module documentation.
   and lines sized by instrumented lines, a source view with per-line
   counts, the targets and sampled inputs, where a line range becomes a
   new target and a brief for the agent.
+- `coverage-force`: assume the build is instrumented when the build script
+  cannot see the flag (profile rustflags, `cargo rustc -- …`). An
+  uninstrumented binary then fails to link, by design.
 - `serve`: the `crabcheck serve` command, a local page over `.crabcheck`
   (grid pages, latest reports, targets, discovered tests) that runs any
   property or test on request with `cargo` on an instrumented build,

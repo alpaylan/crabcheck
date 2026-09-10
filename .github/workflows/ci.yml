@@ -67,8 +67,13 @@ jobs:
       - run: cargo build -p crabcheck --no-default-features
       - run: cargo build -p crabcheck --no-default-features --features json
       - run: cargo build -p crabcheck --no-default-features --features derive
+      # The library builds with every feature; test binaries do not link
+      # uninstrumented, since coverage-force assumes instrumentation. They
+      # are tested under instrumentation in the coverage job.
       - run: cargo build -p crabcheck --all-features
       - run: cargo test -p crabcheck --no-default-features
+      - run: cargo test -p crabcheck --no-default-features --features coverage
+      - run: cargo test -p crabcheck --no-default-features --features derive
       - run: cargo test -p crabcheck --features serve
 
   coverage:
@@ -79,9 +84,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Uninstrumented build still compiles and runs
-        run: cargo test -p crabcheck --features coverage coverage
+        run: cargo test -p crabcheck --features coverage,serve
       - name: Instrumented build reads counters in-process
-        run: cargo test -p crabcheck --features coverage coverage
+        run: cargo test -p crabcheck --features coverage,serve
+        env:
+          RUSTFLAGS: -C instrument-coverage
+          RUST_TEST_THREADS: 1
+      - name: Every feature at once, instrumented (coverage-force links here)
+        run: cargo test -p crabcheck --all-features
         env:
           RUSTFLAGS: -C instrument-coverage
           RUST_TEST_THREADS: 1

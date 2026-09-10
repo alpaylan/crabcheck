@@ -3154,6 +3154,25 @@ mod tests {
         assert!(report.target.is_some(), "targets turn the guided search on: {report}");
     }
 
+    #[cfg(all(crabcheck_instrumented, feature = "coverage"))]
+    #[test]
+    fn novelty_counts_what_an_input_reached_first() {
+        let mut config = cfg();
+        config.seed = Some(1);
+        config.coverage.enabled = true;
+        let mut run = Run::new(&config, gens::int(0i32..=1), |x: i32| branchy(x) > 0);
+        let input = run.draw().expect("ints never discard");
+        let first = run.test(&input);
+        assert!(first.novel() && first.novelty() > 0, "{first:?}");
+        let again = run.test(&input);
+        assert!(!again.novel(), "{again:?}");
+        assert_eq!(again.novelty(), 0, "the same input reaches nothing new");
+        let other = Input { value: 2000, ..input.clone() };
+        let differs = run.test(&other);
+        assert!(differs.novelty() > 0, "the other branch is new: {differs:?}");
+        run.finish().assert_passed();
+    }
+
     #[cfg(all(crabcheck_instrumented, feature = "coverage", feature = "json"))]
     #[test]
     fn the_coverage_grid_is_written() {
