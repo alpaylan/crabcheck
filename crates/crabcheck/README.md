@@ -140,8 +140,11 @@ The full list is in the `config` module documentation.
 - `derive` (default): `#[derive(Arbitrary)]` and `#[crabcheck::test]`.
 - `coverage`: in-process coverage for binaries built with
   `RUSTFLAGS="-C instrument-coverage"`: per-property coverage in the
-  report, coverage-guided search, `cover()` shares and fault localization
-  (suspect functions ranked from the coverage of passing and failing runs).
+  report, coverage-guided search, `cover()` shares, fault localization
+  (suspect functions ranked from the coverage of passing and failing runs)
+  and coverage targets: name a file and line range in
+  `.crabcheck/targets.jsonl` and the search steers toward it and the
+  report says whether it got there.
   Uninstrumented builds compile the same API to no-ops. Run coverage-using
   suites with `RUST_TEST_THREADS=1` for exact attribution, and point
   `LLVM_PROFILE_FILE` into the target directory (see the `coverage` module

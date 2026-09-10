@@ -310,13 +310,14 @@ where
 struct CoverageState {
     tracker: Option<crate::coverage::tracker::Tracker>,
     spectrum: Option<crate::coverage::locate::Spectrum>,
+    targets: Option<crate::coverage::targets::Targets>,
     signature: Option<Signature>,
 }
 
 #[cfg(feature = "coverage")]
 impl CoverageState {
     fn new() -> Self {
-        CoverageState { tracker: None, spectrum: None, signature: None }
+        CoverageState { tracker: None, spectrum: None, targets: None, signature: None }
     }
 
     fn begin(&self) -> Option<crate::coverage::Snapshot> {
@@ -337,6 +338,10 @@ impl CoverageState {
             return Covered::default();
         };
         let observation = tracker.end(&before);
+        let target_hit = match self.targets.as_mut() {
+            Some(targets) => targets.observe(&observation.delta, tracker.inputs()),
+            None => false,
+        };
         let lines = if want_lines {
             crate::coverage::lines_hit(&observation.delta, tracker.selected())
         } else {
@@ -363,7 +368,7 @@ impl CoverageState {
                 },
             }
         }
-        Covered { novel: observation.novel, lines }
+        Covered { novel: observation.novel || target_hit, lines }
     }
 }
 
@@ -441,6 +446,8 @@ struct Run<'a, G: Gen, P> {
     /// `cover` labels: (times met, times seen) over passing tests.
     covers: BTreeMap<String, (u64, u64)>,
     stats: Stats,
+    /// Whether any passing input reported a `target` score.
+    saw_score: bool,
     /// Observation lines for Tyche, when `Config::report.observations` is set.
     observations: Option<Observations>,
     /// Generation time of the latest input, for its observation line.
@@ -784,6 +791,7 @@ where
             #[cfg(not(feature = "json"))]
             observations: None,
             last_gen: std::time::Duration::ZERO,
+            saw_score: false,
         }
     }
 
@@ -932,6 +940,7 @@ where
             }
         }
         if let Some(score) = observed.score {
+            self.saw_score = true;
             self.stats.features.entry("target".to_string()).or_default().push(score);
         }
         let r = hash_u01(self.seed ^ 0x5a5a_5a5a, self.report.tests);
@@ -942,7 +951,8 @@ where
     fn guided(&self) -> bool {
         #[cfg(feature = "coverage")]
         {
-            self.config.coverage.guided && self.coverage.tracker.is_some()
+            (self.config.coverage.guided || self.coverage.targets.is_some())
+                && self.coverage.tracker.is_some()
         }
         #[cfg(not(feature = "coverage"))]
         {
@@ -959,7 +969,11 @@ where
             return None;
         }
         if !crate::coverage::available() {
-            if settings.guided || settings.profraw_dir.is_some() {
+            if settings.guided
+                || settings.profraw_dir.is_some()
+                || !settings.targets.is_empty()
+                || settings.html.is_some()
+            {
                 self.report.warn(
                     "coverage_unavailable",
                     "coverage was requested but this binary is not instrumented; build with RUSTFLAGS=\"-C instrument-coverage\"",
@@ -972,9 +986,12 @@ where
         } else {
             settings.filter.clone()
         };
-        match crate::coverage::tracker::Tracker::new(&filter) {
+        let targets = self.resolve_targets();
+        let extra = targets.as_ref().map(|t| t.functions()).unwrap_or_default();
+        match crate::coverage::tracker::Tracker::new(&filter, &extra) {
             Some(tracker) => {
                 let guard = crate::coverage::lock();
+                self.coverage.targets = targets;
                 if self.config.locate.enabled {
                     self.coverage.spectrum =
                         crate::coverage::locate::Spectrum::new(tracker.selected());
@@ -1004,6 +1021,54 @@ where
                 self.report.warn(
                     "coverage_filter",
                     format!("no instrumented functions match the coverage filter `{filter}`"),
+                );
+                None
+            },
+        }
+    }
+
+    /// The configured coverage targets (inline and from the file), resolved.
+    #[cfg(feature = "coverage")]
+    fn resolve_targets(&mut self) -> Option<crate::coverage::targets::Targets> {
+        let config = self.config;
+        #[cfg_attr(not(feature = "json"), allow(unused_mut))]
+        let mut targets = config.coverage.targets.clone();
+        if let Some(path) = &config.coverage.targets_file {
+            #[cfg(feature = "json")]
+            match crate::config::load_targets(path) {
+                Ok(more) => targets.extend(more),
+                Err(e) => {
+                    self.report
+                        .warn("coverage_targets", format!("could not read the targets file: {e}"))
+                },
+            }
+            #[cfg(not(feature = "json"))]
+            if path.exists() {
+                self.report.warn(
+                    "coverage_targets",
+                    format!("reading {} needs the `json` feature", path.display()),
+                );
+            }
+        }
+        if targets.is_empty() {
+            return None;
+        }
+        match crate::coverage::targets::Targets::resolve(targets) {
+            Some(resolved) => {
+                for target in resolved.unresolved() {
+                    self.report.warn(
+                        "coverage_target",
+                        format!(
+                            "target {target} matches no instrumented code; check the path and lines"
+                        ),
+                    );
+                }
+                Some(resolved)
+            },
+            None => {
+                self.report.warn(
+                    "coverage_targets_unavailable",
+                    "the binary carries no coverage mapping, so coverage targets cannot be resolved",
                 );
                 None
             },
@@ -1127,6 +1192,7 @@ where
         for seed in other.pool.drain() {
             self.pool.add(seed.value, seed.score);
         }
+        self.saw_score |= other.saw_score;
         self.stats.passed_seen.extend(other.stats.passed_seen);
         for (name, mut values) in other.stats.features {
             self.stats.features.entry(name).or_default().append(&mut values);
@@ -1298,6 +1364,7 @@ where
 
         if let Some((best_score, best)) = self.pool.best.clone() {
             self.report.target = Some(TargetSummary {
+                scored: self.saw_score,
                 iterations,
                 improvements: self.pool.improvements,
                 best_score,
@@ -1550,7 +1617,28 @@ where
         #[cfg(feature = "coverage")]
         {
             if let Some(tracker) = self.coverage.tracker.take() {
-                let summary = tracker.summary();
+                let mut summary = tracker.summary();
+                if let Some(targets) = self.coverage.targets.take() {
+                    summary.targets = targets.outcomes();
+                    for outcome in &summary.targets {
+                        if outcome.functions.is_empty() || outcome.hits > 0 {
+                            continue;
+                        }
+                        let function = outcome.functions.join(", ");
+                        let how = if outcome.function_inputs == 0 {
+                            format!("`{function}` was never entered")
+                        } else {
+                            format!(
+                                "`{function}` was entered by {} inputs that took other branches",
+                                outcome.function_inputs
+                            )
+                        };
+                        self.report.warn(
+                            "coverage_target_missed",
+                            format!("target {} was never reached: {how}", outcome.target),
+                        );
+                    }
+                }
                 if summary.inputs >= 100 && !summary.partial.is_empty() {
                     let since = summary.inputs - 1 - summary.last_novelty_at;
                     let missed: usize =
@@ -2379,6 +2467,50 @@ mod tests {
         assert_eq!(crate_of("&mut my_crate::props::sorted"), "my_crate");
         assert_eq!(crate_of("crabcheck"), "crabcheck");
         assert_eq!(crate_of(super::crate_of_probe_name()), "crabcheck");
+    }
+
+    #[cfg(all(crabcheck_instrumented, feature = "coverage"))]
+    const BRANCHY_LINE: u32 = line!() + 3;
+    #[cfg(all(crabcheck_instrumented, feature = "coverage"))]
+    #[rustfmt::skip]
+    fn branchy(x: i32) -> i32 {
+        if x > 1000 {
+            1
+        } else {
+            2
+        }
+    }
+
+    #[cfg(all(crabcheck_instrumented, feature = "coverage"))]
+    #[test]
+    fn coverage_targets_are_resolved_tracked_and_reported() {
+        use crate::config::CoverageTarget;
+        let then_branch = CoverageTarget::new(file!(), BRANCHY_LINE + 2..=BRANCHY_LINE + 2);
+        let else_branch = CoverageTarget::new(file!(), BRANCHY_LINE + 4..=BRANCHY_LINE + 4);
+        let nowhere = CoverageTarget::new("no/such/file.rs", 1..=1);
+        let mut config = cfg();
+        config.tests = 100;
+        config.coverage.targets = vec![then_branch.clone(), else_branch.clone(), nowhere.clone()];
+        config.coverage.targets_file = None;
+        let report = check(&config, gens::int(-100i32..=100), |x| branchy(x) == 2);
+        assert_eq!(report.status, Status::Passed, "{report}");
+        let coverage = report.coverage.as_ref().expect("instrumented");
+        assert_eq!(coverage.targets.len(), 3, "{report}");
+        let (then, els, none) = (&coverage.targets[0], &coverage.targets[1], &coverage.targets[2]);
+        assert_eq!(then.target, then_branch);
+        assert!(then.functions.iter().any(|f| f.contains("branchy")), "{then:?}");
+        assert_eq!(then.hits, 0, "{then:?}");
+        assert!(then.function_inputs > 0, "{then:?}");
+        assert_eq!(els.hits, els.function_inputs, "{els:?}");
+        assert_eq!(els.first_hit_at, Some(1), "{els:?}");
+        assert!(none.functions.is_empty() && none.target == nowhere, "{none:?}");
+        let kinds: Vec<&str> = report.health.iter().map(|w| w.kind.as_str()).collect();
+        assert!(kinds.contains(&"coverage_target_missed"), "{kinds:?}");
+        assert!(kinds.contains(&"coverage_target"), "{kinds:?}");
+        let text = report.to_string();
+        assert!(text.contains("never reached") && text.contains("took other branches"), "{text}");
+        assert!(text.contains("hit by"), "{text}");
+        assert!(report.target.is_some(), "targets turn the guided search on: {report}");
     }
 
     #[cfg(feature = "coverage")]

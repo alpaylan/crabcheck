@@ -72,9 +72,11 @@ impl Tracker {
     /// (`crate` or `crate::module`), or every function except crabcheck's
     /// own when `filter` is empty. `None` when the binary is uninstrumented
     /// or nothing matches.
-    pub fn new(filter: &str) -> Option<Tracker> {
+    /// Track the functions matching `filter` plus `extra` (indices into
+    /// [`Functions::all`], for coverage targets); `None` when that is empty.
+    pub fn new(filter: &str, extra: &[usize]) -> Option<Tracker> {
         let functions = Functions::get();
-        let selected: Vec<usize> = functions
+        let mut selected: Vec<usize> = functions
             .all()
             .iter()
             .enumerate()
@@ -85,6 +87,9 @@ impl Tracker {
             )
             .map(|(i, _)| i)
             .collect();
+        selected.extend(extra.iter().copied().filter(|i| *i < functions.all().len()));
+        selected.sort_unstable();
+        selected.dedup();
         if selected.is_empty() {
             return None;
         }
@@ -115,6 +120,11 @@ impl Tracker {
     /// Indices into [`Functions::all`] of the selected functions.
     pub fn selected(&self) -> &[usize] {
         &self.selected
+    }
+
+    /// Inputs observed so far.
+    pub fn inputs(&self) -> u64 {
+        self.inputs
     }
 
     /// Snapshot the window before running an input.
@@ -196,6 +206,7 @@ impl Tracker {
             unreached: unreached.into_iter().collect(),
             partial,
             growth: self.growth.clone(),
+            targets: Vec::new(),
         }
     }
 }
@@ -229,6 +240,8 @@ pub struct Summary {
     /// coverage grew: a curve that flattens early means the generator has
     /// stopped reaching new code.
     pub growth: Series,
+    /// The coverage targets and what happened to them.
+    pub targets: Vec<super::targets::TargetOutcome>,
 }
 
 fn is_own(name: &str) -> bool {
@@ -277,7 +290,7 @@ mod tests {
 
     #[test]
     fn tracker_matches_the_build() {
-        match Tracker::new("") {
+        match Tracker::new("", &[]) {
             None => assert!(!super::super::available()),
             Some(mut tracker) => {
                 let before = tracker.begin().unwrap();

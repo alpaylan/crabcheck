@@ -184,6 +184,9 @@ pub struct RegressionsSummary {
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "json", derive(serde::Serialize, serde::Deserialize))]
 pub struct TargetSummary {
+    /// Whether the property reported `target` scores; when false the pool
+    /// was seeded by coverage novelty alone and `best_score` is 0.
+    pub scored: bool,
     /// Mutated inputs evaluated in the targeted phase.
     pub iterations: u64,
     /// Times the best score improved.
@@ -693,11 +696,19 @@ impl fmt::Display for Report {
             )?;
         }
         if let Some(target) = &self.target {
-            writeln!(
-                f,
-                "  target: best score {} reached by {} ({} mutated inputs, {} improvements)",
-                target.best_score, target.best_debug, target.iterations, target.improvements
-            )?;
+            if target.scored {
+                writeln!(
+                    f,
+                    "  target: best score {} reached by {} ({} mutated inputs, {} improvements)",
+                    target.best_score, target.best_debug, target.iterations, target.improvements
+                )?;
+            } else {
+                writeln!(
+                    f,
+                    "  guided search: {} mutated inputs from coverage-novel seeds",
+                    target.iterations
+                )?;
+            }
         }
         #[cfg(feature = "coverage")]
         if let Some(coverage) = &self.coverage {
@@ -724,6 +735,24 @@ impl fmt::Display for Report {
                     shown.join(", "),
                     if more > 0 { format!(" (+{more} more)") } else { String::new() }
                 )?;
+            }
+            for outcome in &coverage.targets {
+                let what = if outcome.functions.is_empty() {
+                    "matches no instrumented code".to_string()
+                } else if outcome.hits == 0 {
+                    format!(
+                        "never reached; `{}` entered by {} inputs",
+                        outcome.functions.join(", "),
+                        outcome.function_inputs
+                    )
+                } else {
+                    format!(
+                        "hit by {} inputs (first at input {})",
+                        outcome.hits,
+                        outcome.first_hit_at.unwrap_or(0)
+                    )
+                };
+                writeln!(f, "  target {}: {what}", outcome.target)?;
             }
             if !coverage.partial.is_empty() {
                 let shown: Vec<String> = coverage

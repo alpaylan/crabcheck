@@ -42,6 +42,8 @@
 //! | `CRABCHECK_COVERAGE_GUIDED` | `coverage.guided` |
 //! | `CRABCHECK_PROFRAW_DIR` | `coverage.profraw_dir` |
 //! | `CRABCHECK_MIN_COVER` | `coverage.min_cover` |
+//! | `CRABCHECK_COVERAGE_TARGETS` | `coverage.targets_file` |
+//! | `CRABCHECK_COVERAGE_HTML` | `coverage.html` |
 //! | `CRABCHECK_LOCATE` | `locate.enabled` |
 //! | `CRABCHECK_LOCATE_NEIGHBOURHOOD` | `locate.neighbourhood` |
 //! | `CRABCHECK_LOCATE_TOP` | `locate.top` |
@@ -194,6 +196,82 @@ pub struct CoverageConfig {
     /// Minimum share of passing tests each `cover` label must reach; labels
     /// below it produce a `cover` health warning. Default 0.05.
     pub min_cover: f64,
+    /// Source ranges the search should reach (see the `coverage` module
+    /// docs). Their functions join the tracked set, hitting them counts as
+    /// novelty for the guided search, and the report says whether each was
+    /// reached. Default empty.
+    pub targets: Vec<CoverageTarget>,
+    /// A JSON-lines file of further targets, read when it exists (needs the
+    /// `json` feature). Default `.crabcheck/targets.jsonl`.
+    pub targets_file: Option<PathBuf>,
+    /// Directory to write `<name>.html` into: a self-contained coverage
+    /// grid (modules, files, functions, lines) with the targets and samples,
+    /// from which a range can be turned into a new target. Default none.
+    pub html: Option<PathBuf>,
+}
+
+/// A source range for coverage-guided search to reach. `file` is matched
+/// by suffix against the paths the compiler recorded, so `src/lib.rs`
+/// works from any working directory; lines are inclusive.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "json", derive(serde::Serialize, serde::Deserialize))]
+pub struct CoverageTarget {
+    /// The source file.
+    pub file: String,
+    /// First line, inclusive.
+    pub begin_line: u32,
+    /// Last line, inclusive.
+    pub end_line: u32,
+}
+
+impl CoverageTarget {
+    /// A target for `file` and the inclusive line range.
+    pub fn new(file: impl Into<String>, lines: std::ops::RangeInclusive<u32>) -> Self {
+        CoverageTarget { file: file.into(), begin_line: *lines.start(), end_line: *lines.end() }
+    }
+}
+
+impl fmt::Display for CoverageTarget {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.begin_line == self.end_line {
+            write!(f, "{}:{}", self.file, self.begin_line)
+        } else {
+            write!(f, "{}:{}-{}", self.file, self.begin_line, self.end_line)
+        }
+    }
+}
+
+/// Read targets from a JSON-lines file: either `{"file", "begin_line",
+/// "end_line"}` objects or Antithesis's
+/// `{"antithesis_targeted_coverage": {"locations": [...]}}`. A missing
+/// file is no targets.
+#[cfg(feature = "json")]
+pub fn load_targets(path: &std::path::Path) -> Result<Vec<CoverageTarget>, String> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(format!("{}: {e}", path.display())),
+    };
+    let mut targets = Vec::new();
+    for (number, line) in text.lines().enumerate() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let value: serde_json::Value = serde_json::from_str(line)
+            .map_err(|e| format!("{}:{}: {e}", path.display(), number + 1))?;
+        let locations = match value.get("antithesis_targeted_coverage") {
+            Some(wrapped) => {
+                wrapped.get("locations").and_then(|l| l.as_array()).cloned().unwrap_or_default()
+            },
+            None => vec![value],
+        };
+        for location in locations {
+            let target: CoverageTarget = serde_json::from_value(location)
+                .map_err(|e| format!("{}:{}: {e}", path.display(), number + 1))?;
+            targets.push(target);
+        }
+    }
+    Ok(targets)
 }
 
 impl Default for CoverageConfig {
@@ -204,6 +282,9 @@ impl Default for CoverageConfig {
             guided: false,
             profraw_dir: None,
             min_cover: 0.05,
+            targets: Vec::new(),
+            targets_file: Some(PathBuf::from(".crabcheck/targets.jsonl")),
+            html: None,
         }
     }
 }
@@ -545,6 +626,10 @@ impl Config {
                     })
                 },
                 "CRABCHECK_PROFRAW_DIR" => self.coverage.profraw_dir = Some(PathBuf::from(value)),
+                "CRABCHECK_COVERAGE_TARGETS" => {
+                    self.coverage.targets_file = Some(PathBuf::from(value))
+                },
+                "CRABCHECK_COVERAGE_HTML" => self.coverage.html = Some(PathBuf::from(value)),
                 "CRABCHECK_MIN_COVER" => {
                     parse("a number", &mut |v| {
                         v.parse().map(|n| self.coverage.min_cover = n).is_ok()
@@ -680,5 +765,43 @@ mod tests {
         assert_eq!(config.max_size, Config::default().max_size);
         let again = Config::from_json(&config.to_json()).unwrap();
         assert_eq!(again, config);
+    }
+}
+
+#[cfg(all(test, feature = "json"))]
+mod target_tests {
+    use super::*;
+
+    #[test]
+    fn targets_files_accept_both_shapes_and_may_be_missing() {
+        let dir = std::env::temp_dir().join(format!("crabcheck-targets-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("targets.jsonl");
+        std::fs::write(
+            &path,
+            concat!(
+                "{\"file\": \"src/lib.rs\", \"begin_line\": 10, \"end_line\": 12}\n",
+                "\n",
+                "{\"antithesis_targeted_coverage\": {\"locations\": [",
+                "{\"file\": \"core/foo.rs\", \"begin_line\": 3, \"end_line\": 3},",
+                "{\"file\": \"core/bar.rs\", \"begin_line\": 7, \"end_line\": 9}]}}\n"
+            ),
+        )
+        .unwrap();
+        let targets = load_targets(&path).unwrap();
+        assert_eq!(
+            targets,
+            vec![
+                CoverageTarget::new("src/lib.rs", 10..=12),
+                CoverageTarget::new("core/foo.rs", 3..=3),
+                CoverageTarget::new("core/bar.rs", 7..=9),
+            ]
+        );
+        assert_eq!(targets[0].to_string(), "src/lib.rs:10-12");
+        assert_eq!(targets[1].to_string(), "core/foo.rs:3");
+        assert_eq!(load_targets(&dir.join("missing.jsonl")).unwrap(), vec![]);
+        std::fs::write(&path, "{\"file\": 1}\n").unwrap();
+        assert!(load_targets(&path).unwrap_err().contains("targets.jsonl:1"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

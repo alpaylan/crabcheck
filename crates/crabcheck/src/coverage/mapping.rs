@@ -8,7 +8,10 @@
 //! not loaded into memory on ELF. Format versions 4 to 7 are understood.
 
 use std::{
-    collections::HashMap,
+    collections::{
+        BTreeMap,
+        HashMap,
+    },
     sync::OnceLock,
 };
 
@@ -80,6 +83,39 @@ impl MappedFunction {
     /// Evaluate a counter over the function's counter values.
     pub fn eval(&self, counter: Counter, values: &[u64]) -> u64 {
         self.eval_at(counter, values, 0)
+    }
+
+    /// The count of every line the function's code covers, as
+    /// `(file, line) -> count`, following llvm-cov: a line takes the count
+    /// of the innermost region containing it, so a line inside an untaken
+    /// branch reads 0 even though the enclosing function ran. Branch
+    /// regions contribute both arms.
+    pub fn line_counts(&self, values: &[u64]) -> BTreeMap<(usize, u32), u64> {
+        // (count, region span in lines, region span in columns) per line;
+        // a smaller span wins.
+        let mut lines: BTreeMap<(usize, u32), (u64, u32, u32)> = BTreeMap::new();
+        for region in &self.regions {
+            let count = match region.kind {
+                Kind::Code => self.eval(region.counter, values),
+                Kind::Branch => {
+                    self.eval(region.counter, values) + self.eval(region.false_counter, values)
+                },
+                _ => continue,
+            };
+            let span_lines = region.end_line.saturating_sub(region.start_line);
+            let span_cols = if span_lines == 0 {
+                region.end_col.saturating_sub(region.start_col)
+            } else {
+                u32::MAX
+            };
+            for line in region.start_line..=region.end_line {
+                let entry = lines.entry((region.file, line)).or_insert((count, u32::MAX, u32::MAX));
+                if (span_lines, span_cols) <= (entry.1, entry.2) {
+                    *entry = (count, span_lines, span_cols);
+                }
+            }
+        }
+        lines.into_iter().map(|(key, (count, _, _))| (key, count)).collect()
     }
 
     fn eval_at(&self, counter: Counter, values: &[u64], depth: usize) -> u64 {
@@ -478,6 +514,14 @@ mod tests {
         assert_eq!((r.counter, r.false_counter), (Counter::Ref(1), Counter::Sub(0)));
 
         let values = [5, 2];
+        // Lines 10 and 12 are covered only by the outer region (5); line 11
+        // by the inner whole-line region on the expression (5 - 2 = 3); the
+        // gap-marked region on line 11 does not count.
+        let lines = f.line_counts(&values);
+        assert_eq!(lines[&(1, 10)], 5);
+        assert_eq!(lines[&(1, 12)], 5);
+        assert_eq!(lines[&(1, 11)], 3, "innermost region wins");
+        assert_eq!(f.line_counts(&[5, 0])[&(1, 11)], 5);
         assert_eq!(f.eval(f.regions[0].counter, &values), 5);
         assert_eq!(f.eval(f.regions[1].counter, &values), 3);
         assert_eq!(f.eval(f.regions[2].counter, &values), 2);

@@ -36,6 +36,26 @@
 //! property instead, set `Config::coverage.profraw_dir`; to stop the
 //! process's own dump from a test, call [`suppress_default_dump`].
 //!
+//! # Targets
+//!
+//! A coverage target is a file and a line range the search should reach,
+//! given as `Config::coverage.targets` or in the file
+//! `.crabcheck/targets.jsonl` (`CRABCHECK_COVERAGE_TARGETS`), one JSON
+//! object per line in either of these shapes:
+//!
+//! ```text
+//! {"file": "src/parser.rs", "begin_line": 120, "end_line": 140}
+//! {"antithesis_targeted_coverage": {"locations": [{"file": "src/parser.rs", "begin_line": 120, "end_line": 140}]}}
+//! ```
+//!
+//! The runner resolves each target to the code regions overlapping it, adds
+//! their functions to the tracked set, and treats any input that executes
+//! a target region as novel for the guided search, which then runs even
+//! without `Config::coverage.guided`. The report lists every target with
+//! how many inputs hit it, or, when none did, whether its function was
+//! entered at all, so an agent knows whether to widen the generator or to
+//! change the shape of its inputs.
+//!
 //! # Regions and branches
 //!
 //! Stable Rust instruments *code regions*: every `if` and `match` arm,
@@ -59,6 +79,7 @@ pub(crate) mod locate;
 pub(crate) mod mapping;
 #[cfg_attr(not(crabcheck_instrumented), allow(dead_code))]
 mod names;
+pub(crate) mod targets;
 pub(crate) mod tracker;
 
 pub(crate) use locate::{
@@ -86,5 +107,6 @@ pub use {
         Scores,
         Suspect,
     },
+    targets::TargetOutcome,
     tracker::Summary,
 };

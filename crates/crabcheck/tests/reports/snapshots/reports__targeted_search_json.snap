@@ -1143,6 +1143,7 @@ expression: "serde_json::to_string_pretty(&report).expect(\"report serializes\")
     "saved": false
   },
   "target": {
+    "scored": true,
     "iterations": 100,
     "improvements": 6,
     "best_score": 36.0,

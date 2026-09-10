@@ -416,14 +416,14 @@ fn rank_by<T>(items: &[T], key: impl Fn(&T) -> f64) -> Vec<usize> {
 
 /// Whether a mapping file name and a panic location name the same file:
 /// the compiler may record one absolute and the other relative.
-fn same_file(mapped: &str, panic: &str) -> bool {
+pub(crate) fn same_file(mapped: &str, panic: &str) -> bool {
     let (m, p) = (mapped.replace('\\', "/"), panic.replace('\\', "/"));
     m == p || m.ends_with(&format!("/{p}")) || p.ends_with(&format!("/{m}"))
 }
 
 /// The source lines an input executed, per file, from its counter delta and
-/// the mapping of the selected functions; `None` without a mapping. Code
-/// regions with a non-zero count contribute every line they span.
+/// the mapping of the selected functions; `None` without a mapping. A line
+/// counts as executed when its innermost region ran (llvm-cov's rule).
 pub(crate) fn lines_hit(delta: &Delta, selected: &[usize]) -> Option<BTreeMap<String, Vec<u32>>> {
     let mapping = Mapping::get()?;
     let all = Functions::get().all();
@@ -448,17 +448,9 @@ pub(crate) fn lines_hit(delta: &Delta, selected: &[usize]) -> Option<BTreeMap<St
             }
             values[i - range.start] = count;
         }
-        for region in &mapped.regions {
-            let count = match region.kind {
-                Kind::Code => mapped.eval(region.counter, &values),
-                Kind::Branch => {
-                    mapped.eval(region.counter, &values)
-                        + mapped.eval(region.false_counter, &values)
-                },
-                _ => 0,
-            };
+        for ((file, line), count) in mapped.line_counts(&values) {
             if count > 0 {
-                lines.entry(region.file).or_default().extend(region.start_line..=region.end_line);
+                lines.entry(file).or_default().insert(line);
             }
         }
     }

@@ -1,0 +1,18 @@
+---
+source: crates/crabcheck/tests/reports/main.rs
+expression: report.to_string()
+---
+crabcheck: ok, 456 tests passed (169 distinct, 0 discarded) in [time], seed 24301
+  guided search: 256 mutated inputs from coverage-novel seeds
+  coverage: 1 of 1 functions in `reports::planted` reached, 4 of 4 counters
+  target tests/reports/planted.rs:11: never reached; `reports::planted::classify` entered by 456 inputs
+  target tests/reports/planted.rs:6-7: hit by 456 inputs (first at input 1)
+  timing: property median [time], p90 [time], max [time]; generation median [time], p90 [time], max [time]
+    slowest input: [input]
+  sample (random, iteration 18, size 0): -86
+  sample (random, iteration 4, size 100): 83
+  sample (mutation, iteration 253, size 13): -85
+  sample (mutation, iteration 372, size 100): 65
+  sample (mutation, iteration 426, size 1): 30
+  warning [coverage_target_missed]: target tests/reports/planted.rs:11 was never reached: `reports::planted::classify` was entered by 456 inputs that took other branches
+  warning [low_distinct_inputs]: only 37% of generated inputs were distinct and the last new one appeared at input 454; the generator's space is small or max_size (100) is too low

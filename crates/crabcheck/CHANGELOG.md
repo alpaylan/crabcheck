@@ -84,6 +84,14 @@ library verifies them and makes every failure reproducible from its seed.
   hit-count class (AFL buckets) never seen before seed the targeted
   phase's pool, so the value mutators explore from them even when the
   property reports no `target` score.
+- Coverage targets (`Config::coverage.targets`, the file
+  `.crabcheck/targets.jsonl` in either `{"file","begin_line","end_line"}`
+  or Antithesis's targeted-coverage shape, `CRABCHECK_COVERAGE_TARGETS`):
+  source ranges the search should reach. Their functions join the tracked
+  set, an input that executes a target region counts as novelty for the
+  guided search (which then runs without `coverage.guided`), and the
+  report says per target how many inputs hit it or, when none did, whether
+  its function was entered at all (`coverage_target_missed`).
 - Fault localization in core (`Config::locate`, on by default when
   coverage is collected): the coverage mapping (`__llvm_covmap` and
   `__llvm_covfun`, versions 4 to 7) is read from the running executable,
