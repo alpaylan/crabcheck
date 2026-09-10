@@ -10,7 +10,7 @@ repository.workspace = true
 license.workspace = true
 authors.workspace = true
 rust-version.workspace = true
-include = ["src/**", "Cargo.toml", "README.md", "CHANGELOG.md", "LICENSE"]
+include = ["src/**", "build.rs", "Cargo.toml", "README.md", "CHANGELOG.md", "LICENSE"]
 
 [features]
 default = ["json", "derive"]
@@ -18,8 +18,16 @@ default = ["json", "derive"]
 json = ["dep:serde", "dep:serde_json"]
 # `#[derive(Arbitrary)]` and `#[crabcheck::test]`.
 derive = ["dep:crabcheck-macros"]
+# In-process LLVM coverage counters (needs `-C instrument-coverage` on the
+# final build; detected by the build script).
+coverage = ["dep:rustc-demangle", "dep:miniz_oxide"]
+# Assume the build is instrumented even when the build script cannot see
+# the flag (profile rustflags, `cargo rustc -- ...`).
+coverage-force = ["coverage"]
 
 [dependencies]
+rustc-demangle = { version = "0.1", optional = true }
+miniz_oxide = { version = "0.8", optional = true }
 crabcheck-macros = { version = "0.2.0-dev", path = "../crabcheck-macros", optional = true }
 rand_core = "0.9"
 rand_chacha = "0.9"

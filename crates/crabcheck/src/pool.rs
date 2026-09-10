@@ -83,6 +83,27 @@ impl<T: Clone> Pool<T> {
         new_best
     }
 
+    /// Add an input regardless of its score (coverage-guided search keeps
+    /// inputs for the code they reach, not for their score). Evicts the
+    /// worst seed when full.
+    pub fn add_forced(&mut self, value: T, score: f64) {
+        if self.seeds.len() >= self.capacity
+            && let Some(worst) = self
+                .seeds
+                .iter()
+                .enumerate()
+                .min_by(|a, b| a.1.score.total_cmp(&b.1.score))
+                .map(|(i, _)| i)
+        {
+            self.seeds.swap_remove(worst);
+        }
+        if self.best.as_ref().is_none_or(|(best, _)| score > *best) {
+            self.best = Some((score, value.clone()));
+            self.improvements += 1;
+        }
+        self.seeds.push(Seed { value, score, energy: self.energy });
+    }
+
     /// Pick a seed to mutate, preferring high scores, and spend one unit of
     /// its energy. Seeds whose energy is spent are dropped; when every seed
     /// is spent the energies are refilled so the search keeps going.

@@ -11,6 +11,7 @@ use std::cell::RefCell;
 struct Context {
     labels: Vec<String>,
     scores: Vec<f64>,
+    covers: Vec<(String, bool)>,
 }
 
 thread_local! {
@@ -53,11 +54,25 @@ pub fn target(score: f64) {
     });
 }
 
+/// Declare a case the inputs must exercise: like [`classify`], but the
+/// runner reports the share of passing tests that met `condition` under
+/// `label`, and warns when it falls below
+/// [`Config::coverage.min_cover`](crate::config::CoverageConfig::min_cover).
+pub fn cover(condition: bool, label: impl Into<String>) {
+    CONTEXT.with(|context| {
+        if let Some(context) = context.borrow_mut().as_mut() {
+            context.covers.push((label.into(), condition));
+        }
+    });
+}
+
 /// What a property reported through the side channel.
 pub(crate) struct Observed {
     pub labels: Vec<String>,
     /// The maximum of the scores passed to [`target`], if any.
     pub score: Option<f64>,
+    /// Cover labels and whether their condition held.
+    pub covers: Vec<(String, bool)>,
 }
 
 /// Run `f` with the side channel active and return what it reported.
@@ -70,7 +85,7 @@ pub(crate) fn collect<R>(f: impl FnOnce() -> R) -> (R, Observed) {
         .iter()
         .copied()
         .fold(None, |best: Option<f64>, s| Some(best.map_or(s, |b| b.max(s))));
-    (result, Observed { labels: context.labels, score })
+    (result, Observed { labels: context.labels, score, covers: context.covers })
 }
 
 #[cfg(test)]
@@ -89,9 +104,12 @@ mod tests {
             target(f64::NAN);
             target(5.0);
             target(3.0);
+            cover(true, "c");
+            cover(false, "d");
         });
         assert_eq!(observed.labels, vec!["a", "b"]);
         assert_eq!(observed.score, Some(5.0));
+        assert_eq!(observed.covers, vec![("c".to_string(), true), ("d".to_string(), false)]);
         let ((), none) = collect(|| ());
         assert!(none.labels.is_empty());
         assert_eq!(none.score, None);

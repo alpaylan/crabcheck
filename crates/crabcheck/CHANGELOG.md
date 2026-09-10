@@ -56,6 +56,33 @@ library verifies them and makes every failure reproducible from its seed.
   degenerate generators, slow generation, sizes never reached, shrink
   budget, flakiness, configuration problems). `CRABCHECK_REPORT_JSON`
   appends reports as JSON lines.
+- `coverage` feature: in-process LLVM coverage counters for binaries built
+  with `-C instrument-coverage`. A build script detects the flag and sets
+  `cfg(crabcheck_instrumented)` (the `coverage-force` feature overrides
+  it); uninstrumented builds compile the same API to no-ops.
+  `coverage::snapshot` copies the counter section with atomic loads,
+  `Snapshot::delta` gives the counters an input touched, and
+  `coverage::Functions` maps counters to demangled function names from
+  the profile data and names sections. `check` collects coverage per
+  input (snapshot, run, diff; never a counter reset) under a process-wide
+  lock and reports functions reached, partly covered and never reached,
+  counters hit and when coverage last grew (`Report::coverage`;
+  `Config::coverage.filter` selects the crate under test by name prefix
+  and defaults to the crate that authored the property). Health warnings:
+  `coverage_threads` when `RUST_TEST_THREADS` is not 1,
+  `coverage_plateau` when the generator stopped reaching new code,
+  `coverage_unavailable` when a coverage option is requested in an
+  uninstrumented build. `Config::coverage.profraw_dir` writes one
+  `.profraw` per property for `llvm-cov`/`cargo llvm-cov`.
+- Coverage-guided search (`Config::coverage.guided`,
+  `CRABCHECK_COVERAGE_GUIDED=1`): inputs that reach a counter or a
+  hit-count class (AFL buckets) never seen before seed the targeted
+  phase's pool, so the value mutators explore from them even when the
+  property reports no `target` score.
+- `cover(condition, label)`: records how often a condition held across
+  passing tests; `Report::covers` carries the shares and a `cover`
+  warning fires when a label is met by fewer than
+  `Config::coverage.min_cover` of the tests.
 - `crabcheck-macros` (default `derive` feature): `#[derive(Arbitrary)]`
   with `#[crabcheck(gen = ...)]` field overrides, and `#[crabcheck::test]`.
 

@@ -35,6 +35,25 @@ use crate::{
     runner::mix,
 };
 
+/// The configuration a checker runs with: the coverage filter defaults to
+/// the crate that authored `support`, not to crabcheck's own closures.
+fn authored_by<S>(config: &Config, support: &S) -> Config {
+    #[cfg(feature = "coverage")]
+    {
+        let mut config = config.clone();
+        if config.coverage.filter.is_empty() {
+            config.coverage.filter =
+                crate::runner::crate_of(std::any::type_name_of_val(support)).to_string();
+        }
+        config
+    }
+    #[cfg(not(feature = "coverage"))]
+    {
+        let _ = support;
+        config.clone()
+    }
+}
+
 /// Every generated value satisfies `support`.
 pub fn check_generator<G>(
     config: &Config,
@@ -45,7 +64,8 @@ where
     G: Gen,
     G::Value: Clone + Debug,
 {
-    check(config, generator, move |value| {
+    let config = authored_by(config, &support);
+    check(&config, generator, move |value| {
         TestResult::check(support(&value), "generated value outside the support")
     })
 }
@@ -65,7 +85,8 @@ where
 {
     let shared = BoxGen::new(generator);
     let hooks = shared.clone();
-    check(config, shared, move |value| {
+    let config = authored_by(config, &support);
+    check(&config, shared, move |value| {
         let value_size = size(&value);
         let candidates = hooks.shrink(&value);
         classify(candidates.is_empty(), "no shrink candidates");
@@ -118,7 +139,8 @@ where
     let base = config.seed.unwrap_or(0);
     let max_size = config.max_size;
     let counter = Cell::new(0u64);
-    let mut report = check(config, shared, move |value| {
+    let config = authored_by(config, &support);
+    let mut report = check(&config, shared, move |value| {
         let index = counter.get();
         counter.set(index + 1);
         let mut source = Source::new(mix(base, index), max_size);

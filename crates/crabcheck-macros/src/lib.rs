@@ -474,7 +474,13 @@ fn expand_test(args: Punctuated<Meta, Token![,]>, func: ItemFn) -> syn::Result<T
         #[test]
         #vis fn #name() {
             #inner
-            let __config = #config;
+            let __config = {
+                let mut __config: ::crabcheck::Config = #config;
+                if __config.coverage.filter.is_empty() {
+                    __config.coverage.filter = ::core::env!("CARGO_PKG_NAME").replace('-', "_");
+                }
+                __config
+            };
             let __report = ::crabcheck::check(
                 &__config,
                 ::crabcheck::any::<(#(#types,)*)>(),

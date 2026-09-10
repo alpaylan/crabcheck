@@ -5,7 +5,10 @@ mod panic;
 pub mod testable;
 
 use std::{
-    collections::HashSet,
+    collections::{
+        BTreeMap,
+        HashSet,
+    },
     fmt::{
         self,
         Debug,
@@ -100,6 +103,7 @@ where
     for problem in problems {
         run.report.warn("config_env", problem);
     }
+    let _coverage_guard = run.enable_coverage();
 
     if let Some(point) = config.replay {
         let attempt = run.run_point(point);
@@ -220,6 +224,11 @@ where
     for problem in problems {
         run.report.warn("config_env", problem);
     }
+    #[cfg(feature = "coverage")]
+    if config.coverage.enabled && crate::coverage::available() {
+        run.report
+            .warn("coverage_par", "coverage is not collected by check_par; use check for coverage");
+    }
 
     let per_thread = config.tests.div_ceil(threads as u64);
     let worker_configs: Vec<Config> =
@@ -279,6 +288,25 @@ where
     run.finish()
 }
 
+/// The crate a type was defined in, read off its `type_name`: the first
+/// path segment after any reference or pointer sigils.
+#[cfg(feature = "coverage")]
+pub(crate) fn crate_of(type_name: &str) -> &str {
+    let bare = type_name
+        .trim_start_matches(['&', '*', '<'])
+        .trim_start_matches("mut ")
+        .trim_start_matches("dyn ");
+    let end = bare.find(|c: char| !(c.is_alphanumeric() || c == '_')).unwrap_or(bare.len());
+    &bare[..end]
+}
+
+#[cfg(all(test, feature = "coverage"))]
+fn crate_of_probe_name() -> &'static str {
+    let probe = |x: i32| x;
+    let _ = probe(0);
+    std::any::type_name_of_val(&probe)
+}
+
 fn property_name(config: &Config) -> String {
     config
         .name
@@ -300,6 +328,10 @@ struct Run<'a, G: Gen, P> {
     seen: HashSet<u64>,
     generated: u64,
     pool: Pool<G::Value>,
+    #[cfg(feature = "coverage")]
+    tracker: Option<crate::coverage::tracker::Tracker>,
+    /// `cover` labels: (times met, times seen) over passing tests.
+    covers: BTreeMap<String, (u64, u64)>,
 }
 
 /// A failing input found by the random or targeted phase.
@@ -313,9 +345,18 @@ struct Found<T> {
 }
 
 enum Attempt {
-    Passed { size: usize, labels: Vec<String>, score: Option<f64> },
+    Passed {
+        size: usize,
+        labels: Vec<String>,
+        score: Option<f64>,
+        novel: bool,
+        covers: Vec<(String, bool)>,
+    },
     Discarded(String),
-    Failed { size: usize, result: Result<Outcome, PanicInfo> },
+    Failed {
+        size: usize,
+        result: Result<Outcome, PanicInfo>,
+    },
     GenPanicked(PanicInfo),
 }
 
@@ -338,6 +379,9 @@ where
             seen: HashSet::new(),
             generated: 0,
             pool: Pool::new(config.target.pool_size, config.target.energy),
+            #[cfg(feature = "coverage")]
+            tracker: None,
+            covers: BTreeMap::new(),
         }
     }
 
@@ -380,10 +424,18 @@ where
         };
         self.generated += 1;
         self.seen.insert(debug_hash(&value));
+        let before = self.cov_begin();
         let (result, observed) = self.evaluate(value);
+        let novel = self.cov_end(before);
         match result {
             Ok(Outcome::Pass) => {
-                Attempt::Passed { size, labels: observed.labels, score: observed.score }
+                Attempt::Passed {
+                    size,
+                    labels: observed.labels,
+                    score: observed.score,
+                    novel,
+                    covers: observed.covers,
+                }
             },
             Ok(Outcome::Discard(reason)) => Attempt::Discarded(reason),
             result => Attempt::Failed { size, result },
@@ -395,12 +447,102 @@ where
         *self.report.discard_reasons.entry(reason).or_default() += 1;
     }
 
-    fn record_pass(&mut self, size: usize, labels: Vec<String>) {
+    fn record_pass(&mut self, size: usize, labels: Vec<String>, covers: Vec<(String, bool)>) {
         self.report.tests += 1;
         *self.report.sizes.entry(size).or_default() += 1;
         for label in labels {
             *self.report.labels.entry(label).or_default() += 1;
         }
+        for (label, met) in covers {
+            let entry = self.covers.entry(label).or_insert((0, 0));
+            entry.0 += u64::from(met);
+            entry.1 += 1;
+        }
+    }
+
+    /// Whether coverage-guided search is on and coverage is being collected.
+    fn guided(&self) -> bool {
+        #[cfg(feature = "coverage")]
+        {
+            self.config.coverage.guided && self.tracker.is_some()
+        }
+        #[cfg(not(feature = "coverage"))]
+        {
+            false
+        }
+    }
+
+    #[cfg(feature = "coverage")]
+    /// Start collecting coverage if configured and available. Returns the
+    /// process-wide coverage lock, which the caller holds for the run.
+    fn enable_coverage(&mut self) -> Option<std::sync::MutexGuard<'static, ()>> {
+        let settings = &self.config.coverage;
+        if !settings.enabled {
+            return None;
+        }
+        if !crate::coverage::available() {
+            if settings.guided || settings.profraw_dir.is_some() {
+                self.report.warn(
+                    "coverage_unavailable",
+                    "coverage was requested but this binary is not instrumented; build with RUSTFLAGS=\"-C instrument-coverage\"",
+                );
+            }
+            return None;
+        }
+        let filter = if settings.filter.is_empty() {
+            crate_of(std::any::type_name::<P>()).to_string()
+        } else {
+            settings.filter.clone()
+        };
+        match crate::coverage::tracker::Tracker::new(&filter) {
+            Some(tracker) => {
+                let guard = crate::coverage::lock();
+                self.tracker = Some(tracker);
+                if std::env::var("RUST_TEST_THREADS").ok().as_deref() != Some("1") {
+                    self.report.warn(
+                        "coverage_threads",
+                        "coverage is attributed per input, and other test threads running at the same time pollute it; \
+                         run with RUST_TEST_THREADS=1 for exact attribution",
+                    );
+                }
+                Some(guard)
+            },
+            None => {
+                self.report.warn(
+                    "coverage_filter",
+                    format!("no instrumented functions match the coverage filter `{filter}`"),
+                );
+                None
+            },
+        }
+    }
+
+    #[cfg(not(feature = "coverage"))]
+    fn enable_coverage(&mut self) -> Option<()> {
+        None
+    }
+
+    #[cfg(feature = "coverage")]
+    fn cov_begin(&self) -> Option<crate::coverage::Snapshot> {
+        self.tracker.as_ref().and_then(|t| t.begin())
+    }
+
+    #[cfg(feature = "coverage")]
+    fn cov_end(&mut self, before: Option<crate::coverage::Snapshot>) -> bool {
+        match (self.tracker.as_mut(), before) {
+            (Some(tracker), Some(before)) => tracker.end(&before).novel,
+            _ => false,
+        }
+    }
+
+    #[cfg(not(feature = "coverage"))]
+    fn cov_begin(&self) -> Option<()> {
+        None
+    }
+
+    #[cfg(not(feature = "coverage"))]
+    fn cov_end(&mut self, _before: Option<()>) -> bool {
+        false
     }
 
     /// The random-testing loop. Returns the first failing input, which the
@@ -443,14 +585,9 @@ where
                     return None;
                 },
                 Attempt::Discarded(reason) => self.record_discard(reason),
-                Attempt::Passed { size, labels, score } => {
-                    self.record_pass(size, labels);
-                    if let Some(score) = score
-                        && self.pool.improves(score)
-                        && let Some(value) = self.regenerate(point)
-                    {
-                        self.pool.add(value, score);
-                    }
+                Attempt::Passed { size, labels, score, novel, covers } => {
+                    self.record_pass(size, labels, covers);
+                    self.keep_if_interesting(point, score, novel);
                 },
                 Attempt::Failed { size, result } => {
                     let value = self.regenerate(point)?;
@@ -459,6 +596,23 @@ where
             }
         }
         None
+    }
+
+    /// Keep a passing input as a targeted-phase seed when its score improves
+    /// the pool, or when guided search is on and it reached new coverage.
+    fn keep_if_interesting(&mut self, point: ReplayPoint, score: Option<f64>, novel: bool) {
+        let guided = self.guided();
+        let by_score = score.is_some_and(|s| self.pool.improves(s));
+        if !(by_score || (novel && guided)) {
+            return;
+        }
+        if let Some(value) = self.regenerate(point) {
+            if by_score {
+                self.pool.add(value, score.unwrap_or(0.0));
+            } else {
+                self.pool.add_forced(value, score.unwrap_or(0.0));
+            }
+        }
     }
 
     /// Fold a worker's statistics into this run.
@@ -480,6 +634,11 @@ where
         }
         report.health.append(&mut other.report.health);
         report.stopped_by_budget |= other.report.stopped_by_budget;
+        for (label, (met, total)) in other.covers {
+            let entry = self.covers.entry(label).or_insert((0, 0));
+            entry.0 += met;
+            entry.1 += total;
+        }
         if other.report.status != Status::Passed && report.status == Status::Passed {
             report.status = other.report.status;
             report.abort = other.report.abort.take();
@@ -534,14 +693,9 @@ where
                         discarded += 1;
                         self.record_discard(reason);
                     },
-                    Attempt::Passed { size, labels, score } => {
-                        self.record_pass(size, labels);
-                        if let Some(score) = score
-                            && self.pool.improves(score)
-                            && let Some(value) = self.regenerate(point)
-                        {
-                            self.pool.add(value, score);
-                        }
+                    Attempt::Passed { size, labels, score, novel, covers } => {
+                        self.record_pass(size, labels, covers);
+                        self.keep_if_interesting(point, score, novel);
                     },
                     Attempt::Failed { size, result } => {
                         if let Some(value) = self.regenerate(point) {
@@ -572,12 +726,20 @@ where
             };
             self.generated += 1;
             self.seen.insert(debug_hash(&mutant));
+            let before = self.cov_begin();
             let (result, observed) = self.evaluate(mutant.clone());
+            let novel = self.cov_end(before);
             match result {
                 Ok(Outcome::Pass) => {
-                    self.record_pass(size, observed.labels);
-                    if let Some(score) = observed.score {
-                        self.pool.add(mutant, score);
+                    self.record_pass(size, observed.labels, observed.covers);
+                    let guided = self.guided();
+                    match observed.score {
+                        Some(score) if self.pool.improves(score) => {
+                            self.pool.add(mutant, score);
+                        },
+                        Some(score) if novel && guided => self.pool.add_forced(mutant, score),
+                        None if novel && guided => self.pool.add_forced(mutant, 0.0),
+                        _ => {},
                     }
                 },
                 Ok(Outcome::Discard(reason)) => {
@@ -716,6 +878,57 @@ where
         self.report.duration = self.started.elapsed();
         self.report.distinct_inputs_ratio =
             if self.generated == 0 { 1.0 } else { self.seen.len() as f64 / self.generated as f64 };
+        for (label, (met, total)) in &self.covers {
+            let share = if *total == 0 { 0.0 } else { *met as f64 / *total as f64 };
+            self.report.covers.insert(label.clone(), share);
+            if *total >= 20 && share < self.config.coverage.min_cover {
+                self.report.warn(
+                    "cover",
+                    format!(
+                        "cover `{label}` was met by {:.1}% of passing tests, below the required {:.0}%",
+                        share * 100.0,
+                        self.config.coverage.min_cover * 100.0
+                    ),
+                );
+            }
+        }
+        #[cfg(feature = "coverage")]
+        {
+            if let Some(tracker) = self.tracker.take() {
+                let summary = tracker.summary();
+                if summary.inputs >= 100 && !summary.partial.is_empty() {
+                    let since = summary.inputs - 1 - summary.last_novelty_at;
+                    let missed: usize =
+                        summary.partial.iter().map(|(_, hit, total)| total - hit).sum();
+                    if since > (summary.inputs / 4).max(100) {
+                        self.report.warn(
+                            "coverage_plateau",
+                            format!(
+                                "coverage of `{}` last grew at input {} and {missed} {} in the functions it \
+                                 reaches never hit; the generator may be too narrow",
+                                summary.filter,
+                                summary.last_novelty_at,
+                                if missed == 1 { "counter was" } else { "counters were" }
+                            ),
+                        );
+                    }
+                }
+                self.report.coverage = Some(summary);
+            }
+            if let Some(dir) = &self.config.coverage.profraw_dir
+                && crate::coverage::available()
+            {
+                match crate::coverage::tracker::write_profraw(dir, &self.name) {
+                    Ok(path) => self.report.profraw = Some(path),
+                    Err(e) => {
+                        self.report.warn(
+                            "profraw",
+                            format!("could not write profraw to {}: {e}", dir.display()),
+                        )
+                    },
+                }
+            }
+        }
         health::assess(&mut self.report, self.config);
         #[cfg(feature = "json")]
         if let Some(path) = &self.config.report.json_path {
@@ -1347,6 +1560,61 @@ mod tests {
         let summary = report.target.as_ref().unwrap();
         assert_eq!(summary.iterations, 50);
         assert!(summary.best_score >= 20.0, "{}", summary.best_score);
+    }
+
+    #[test]
+    fn cover_labels_are_reported_and_warned() {
+        let report = check(&cfg(), gens::vec(gens::int(0..=9)), |v: Vec<i32>| {
+            crate::cover(v.len() > 100, "long");
+            crate::cover(true, "always");
+            true
+        });
+        assert_eq!(report.covers.get("long"), Some(&0.0));
+        assert_eq!(report.covers.get("always"), Some(&1.0));
+        let warning = report.health.iter().find(|w| w.kind == "cover").expect("cover warning");
+        assert!(warning.message.contains("`long`"), "{}", warning.message);
+        assert!(report.to_string().contains("cover: always 100%, long 0%"), "{report}");
+    }
+
+    #[cfg(feature = "coverage")]
+    #[test]
+    fn the_default_coverage_filter_is_the_property_crate() {
+        assert_eq!(crate_of("bst::main::{{closure}}"), "bst");
+        assert_eq!(crate_of("&my_crate::props::sorted"), "my_crate");
+        assert_eq!(crate_of("&mut my_crate::props::sorted"), "my_crate");
+        assert_eq!(crate_of("crabcheck"), "crabcheck");
+        assert_eq!(crate_of(super::crate_of_probe_name()), "crabcheck");
+    }
+
+    #[cfg(feature = "coverage")]
+    #[test]
+    fn coverage_summary_matches_the_build() {
+        let report = check(&cfg(), gens::vec(gens::int(0..=9)), |v: Vec<i32>| v.len() <= 100);
+        if crate::coverage::available() {
+            let coverage = report.coverage.as_ref().expect("coverage collected");
+            assert!(coverage.functions_total > 0);
+            assert_eq!(coverage.inputs, 64);
+            assert!(report.to_string().contains("coverage:"), "{report}");
+        } else {
+            assert!(report.coverage.is_none());
+            assert!(
+                !report.health.iter().any(|w| w.kind.starts_with("coverage")),
+                "{:?}",
+                report.health
+            );
+        }
+        let mut wants = cfg();
+        wants.coverage.guided = true;
+        let report = check(&wants, gens::vec(gens::int(0..=9)), |v: Vec<i32>| v.len() <= 100);
+        if crate::coverage::available() {
+            assert!(report.target.is_some(), "guided search seeds the pool from novelty: {report}");
+        } else {
+            assert!(
+                report.health.iter().any(|w| w.kind == "coverage_unavailable"),
+                "{:?}",
+                report.health
+            );
+        }
     }
 
     #[test]

@@ -83,10 +83,12 @@
 //! assert_eq!(trees.generate(&mut Source::new(42, 10)), tree);
 //! ```
 
-#![forbid(unsafe_code)]
+#![deny(unsafe_code)]
 
 pub mod arbitrary;
 pub mod config;
+#[cfg(feature = "coverage")]
+pub mod coverage;
 pub mod gens;
 mod health;
 pub mod hooks;
@@ -132,6 +134,7 @@ pub use {
         check_par,
         labels::{
             classify,
+            cover,
             label,
             target,
         },
@@ -154,6 +157,21 @@ pub use crabcheck_macros::Arbitrary;
 #[cfg(feature = "derive")]
 pub use crabcheck_macros::test;
 
+/// A file-name-safe stem for a property name (shared by the regressions
+/// file and profraw output).
+#[cfg(feature = "coverage")]
+pub(crate) fn regressions_file_stem(name: &str) -> String {
+    let mut out: String = name
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '.' { c } else { '_' })
+        .collect();
+    while out.contains("__") {
+        out = out.replace("__", "_");
+    }
+    let trimmed = out.trim_matches('_');
+    if trimmed.is_empty() { "unnamed".to_string() } else { trimmed.to_string() }
+}
+
 /// Everything a test module usually needs.
 pub mod prelude {
     pub use crate::{
@@ -175,6 +193,7 @@ pub mod prelude {
         check_par,
         check_shrinker,
         classify,
+        cover,
         gens,
         label,
         quickcheck,

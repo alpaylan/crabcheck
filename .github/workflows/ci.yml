@@ -65,6 +65,21 @@ jobs:
       - run: cargo build -p crabcheck --all-features
       - run: cargo test -p crabcheck --no-default-features
 
+  coverage:
+    name: Coverage feature (instrumented and not)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Uninstrumented build still compiles and runs
+        run: cargo test -p crabcheck --features coverage coverage
+      - name: Instrumented build reads counters in-process
+        run: cargo test -p crabcheck --features coverage coverage
+        env:
+          RUSTFLAGS: -C instrument-coverage
+          RUST_TEST_THREADS: 1
+
   msrv:
     name: MSRV (1.88)
     runs-on: ubuntu-latest
@@ -92,7 +107,7 @@ jobs:
       - name: Only source, manifest, README, CHANGELOG and LICENSE may ship
         run: |
           cargo package -p crabcheck --list --allow-dirty | tee package.txt
-          if grep -vE '^(src/|tests/|Cargo\.toml$|Cargo\.toml\.orig$|Cargo\.lock$|\.cargo_vcs_info\.json$|README\.md$|CHANGELOG\.md$|LICENSE$)' package.txt; then
+          if grep -vE '^(src/|tests/|build\.rs$|Cargo\.toml$|Cargo\.toml\.orig$|Cargo\.lock$|\.cargo_vcs_info\.json$|README\.md$|CHANGELOG\.md$|LICENSE$)' package.txt; then
             echo "::error::unexpected files in package (see above)"; exit 1
           fi
 

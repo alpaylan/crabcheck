@@ -37,6 +37,11 @@
 //! | `CRABCHECK_SHRINK_TIMEOUT_MS` | `shrink.timeout_ms` |
 //! | `CRABCHECK_TARGET_TESTS` | `target.tests` |
 //! | `CRABCHECK_TARGET_POOL_SIZE` | `target.pool_size` |
+//! | `CRABCHECK_COVERAGE` | `coverage.enabled` |
+//! | `CRABCHECK_COVERAGE_FILTER` | `coverage.filter` |
+//! | `CRABCHECK_COVERAGE_GUIDED` | `coverage.guided` |
+//! | `CRABCHECK_PROFRAW_DIR` | `coverage.profraw_dir` |
+//! | `CRABCHECK_MIN_COVER` | `coverage.min_cover` |
 //! | `CRABCHECK_REGRESSIONS` | `regressions.save` and `regressions.replay` |
 //! | `CRABCHECK_REGRESSIONS_DIR` | `regressions.dir` |
 //! | `CRABCHECK_TRUNCATE_DEBUG_AT` | `report.truncate_debug_at` |
@@ -119,6 +124,9 @@ pub struct Config {
     pub shrink: ShrinkConfig,
     /// The targeted phase (used when the property calls [`target`](crate::target)).
     pub target: TargetConfig,
+    /// Coverage collection (needs the `coverage` feature and an instrumented
+    /// build).
+    pub coverage: CoverageConfig,
     /// Remembered failures.
     pub regressions: RegressionsConfig,
     /// Report rendering.
@@ -151,6 +159,46 @@ pub struct TargetConfig {
     /// Share of iterations that draw a fresh random input instead of
     /// mutating a seed. Default 0.1.
     pub explore: f64,
+}
+
+/// Coverage collection and use, with the `coverage` feature on a binary
+/// built with `-C instrument-coverage`. Without both, these settings do
+/// nothing.
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "json", derive(serde::Serialize, serde::Deserialize), serde(default))]
+pub struct CoverageConfig {
+    /// Collect per-input coverage and summarise it in the report. Default
+    /// true (a no-op when unavailable).
+    pub enabled: bool,
+    /// Track only functions whose demangled name starts with this crate or
+    /// module path. Empty (the default) means the crate the property was
+    /// defined in: `#[crabcheck::test]` uses the package name, `check` reads
+    /// it off the property's type name. Set it explicitly when the property
+    /// lives in an integration-test crate and the code under test in the
+    /// library (`"my_lib"`), or to a module (`"my_lib::parser"`).
+    pub filter: String,
+    /// Coverage-guided search: inputs that reach new counters join the
+    /// targeted phase's pool, and the targeted phase runs even when the
+    /// property reports no scores. Default false.
+    pub guided: bool,
+    /// Write `<dir>/<name>.profraw` at the end of the run for `llvm-cov`.
+    /// Default none.
+    pub profraw_dir: Option<PathBuf>,
+    /// Minimum share of passing tests each `cover` label must reach; labels
+    /// below it produce a `cover` health warning. Default 0.05.
+    pub min_cover: f64,
+}
+
+impl Default for CoverageConfig {
+    fn default() -> Self {
+        CoverageConfig {
+            enabled: true,
+            filter: String::new(),
+            guided: false,
+            profraw_dir: None,
+            min_cover: 0.05,
+        }
+    }
 }
 
 /// Where and whether failing inputs are remembered (needs the `json`
@@ -195,6 +243,7 @@ impl Default for Config {
             replay: None,
             shrink: ShrinkConfig::default(),
             target: TargetConfig::default(),
+            coverage: CoverageConfig::default(),
             regressions: RegressionsConfig::default(),
             report: ReportConfig::default(),
         }
@@ -437,6 +486,23 @@ impl Config {
                 "CRABCHECK_TARGET_POOL_SIZE" => {
                     parse("an integer", &mut |v| {
                         v.parse().map(|n| self.target.pool_size = n).is_ok()
+                    })
+                },
+                "CRABCHECK_COVERAGE" => {
+                    parse("0/1/true/false", &mut |v| {
+                        parse_bool(v).map(|b| self.coverage.enabled = b).is_some()
+                    })
+                },
+                "CRABCHECK_COVERAGE_FILTER" => self.coverage.filter = value.clone(),
+                "CRABCHECK_COVERAGE_GUIDED" => {
+                    parse("0/1/true/false", &mut |v| {
+                        parse_bool(v).map(|b| self.coverage.guided = b).is_some()
+                    })
+                },
+                "CRABCHECK_PROFRAW_DIR" => self.coverage.profraw_dir = Some(PathBuf::from(value)),
+                "CRABCHECK_MIN_COVER" => {
+                    parse("a number", &mut |v| {
+                        v.parse().map(|n| self.coverage.min_cover = n).is_ok()
                     })
                 },
                 "CRABCHECK_REGRESSIONS" => {

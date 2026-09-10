@@ -142,41 +142,53 @@ fn main() {
     let bug = std::env::args().any(|a| a == "--bug");
     // The planted bug needs two coincidences (inserting an existing key, then
     // looking up a key in its right subtree), so give the search room.
-    let config = Config::default().tests(1000).name("bst");
+    let config = Config::default().tests(1000);
     let trees = (|g: &mut Source| bst(g, -20, 20, 6)).with_shrink(shrink_bst).boxed();
 
     // The shrinker is code, so verify it: every candidate is a BST with keys in
     // range, and strictly fewer nodes.
     let in_support =
         |t: &Tree| is_bst(t) && t.to_list().iter().all(|(k, _)| (-20..=20).contains(k));
-    let verified = check_shrinker(&config, trees.clone(), in_support, |t| t.size() as u64);
+    let verified =
+        check_shrinker(&config.clone().name("shrink_bst"), trees.clone(), in_support, |t| {
+            t.size() as u64
+        });
     print!("{verified}");
     assert!(verified.passed());
     let key = gens::int(-25i32..=25);
     let value = gens::int(0..=9);
 
-    let insert_valid = check(&config, (trees.clone(), key, value), |(t, k, v)| {
-        classify(t.size() == 0, "empty tree");
-        classify(t.find(k).is_some(), "key present");
-        TestResult::check(is_bst(&t.insert(k, v, bug)), "insert breaks the BST invariant")
-    });
+    let insert_valid =
+        check(&config.clone().name("insert_valid"), (trees.clone(), key, value), |(t, k, v)| {
+            classify(t.size() == 0, "empty tree");
+            classify(t.find(k).is_some(), "key present");
+            TestResult::check(is_bst(&t.insert(k, v, bug)), "insert breaks the BST invariant")
+        });
     print!("{insert_valid}");
 
-    let insert_post = check(&config, (trees.clone(), key, key, value), |(t, k, k2, v)| {
-        let inserted = t.insert(k, v, bug);
-        let expected = if k == k2 { Some(v) } else { t.find(k2) };
-        TestResult::check(inserted.find(k2) == expected, "insert changes other keys")
-    });
+    let insert_post = check(
+        &config.clone().name("insert_post"),
+        (trees.clone(), key, key, value),
+        |(t, k, k2, v)| {
+            let inserted = t.insert(k, v, bug);
+            let expected = if k == k2 { Some(v) } else { t.find(k2) };
+            TestResult::check(inserted.find(k2) == expected, "insert changes other keys")
+        },
+    );
     print!("{insert_post}");
 
-    let delete_valid = check(&config, (trees.clone(), key), |(t, k)| is_bst(&t.delete(k)));
+    let delete_valid =
+        check(&config.clone().name("delete_valid"), (trees.clone(), key), |(t, k)| {
+            is_bst(&t.delete(k))
+        });
     print!("{delete_valid}");
 
-    let delete_post = check(&config, (trees.clone(), key, key), |(t, k, k2)| {
-        let deleted = t.delete(k);
-        let expected = if k == k2 { None } else { t.find(k2) };
-        deleted.find(k2) == expected
-    });
+    let delete_post =
+        check(&config.clone().name("delete_post"), (trees.clone(), key, key), |(t, k, k2)| {
+            let deleted = t.delete(k);
+            let expected = if k == k2 { None } else { t.find(k2) };
+            deleted.find(k2) == expected
+        });
     print!("{delete_post}");
 
     let all_passed =

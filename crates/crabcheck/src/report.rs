@@ -234,6 +234,15 @@ pub struct Report {
     pub regressions: RegressionsSummary,
     /// The targeted phase, when the property reported scores.
     pub target: Option<TargetSummary>,
+    /// Coverage of the crate under test, when collected (`coverage` feature,
+    /// instrumented build).
+    #[cfg(feature = "coverage")]
+    pub coverage: Option<crate::coverage::Summary>,
+    /// Path of the profraw written for `llvm-cov`, when requested.
+    pub profraw: Option<PathBuf>,
+    /// Labels registered with [`cover`](crate::cover) and the share of passing
+    /// tests that carried each.
+    pub covers: BTreeMap<String, f64>,
     /// How many passing tests carried each label (see [`label`](crate::label)).
     pub labels: BTreeMap<String, u64>,
     /// How many passing tests ran at each size.
@@ -264,6 +273,10 @@ impl Report {
             replay: None,
             regressions: RegressionsSummary::default(),
             target: None,
+            #[cfg(feature = "coverage")]
+            coverage: None,
+            profraw: None,
+            covers: BTreeMap::new(),
             labels: BTreeMap::new(),
             sizes: BTreeMap::new(),
             discard_reasons: BTreeMap::new(),
@@ -450,6 +463,59 @@ impl fmt::Display for Report {
                 "  target: best score {} reached by {} ({} mutated inputs, {} improvements)",
                 target.best_score, target.best_debug, target.iterations, target.improvements
             )?;
+        }
+        #[cfg(feature = "coverage")]
+        if let Some(coverage) = &self.coverage {
+            writeln!(
+                f,
+                "  coverage: {} of {} functions{} reached, {} of {} counters",
+                coverage.functions_reached,
+                coverage.functions_total,
+                if coverage.filter.is_empty() {
+                    String::new()
+                } else {
+                    format!(" in `{}`", coverage.filter)
+                },
+                coverage.counters_hit,
+                coverage.counters_total
+            )?;
+            if !coverage.unreached.is_empty() {
+                let shown: Vec<&str> =
+                    coverage.unreached.iter().take(5).map(String::as_str).collect();
+                let more = coverage.unreached.len().saturating_sub(shown.len());
+                writeln!(
+                    f,
+                    "  never reached: {}{}",
+                    shown.join(", "),
+                    if more > 0 { format!(" (+{more} more)") } else { String::new() }
+                )?;
+            }
+            if !coverage.partial.is_empty() {
+                let shown: Vec<String> = coverage
+                    .partial
+                    .iter()
+                    .take(5)
+                    .map(|(name, hit, total)| format!("{name} {hit}/{total}"))
+                    .collect();
+                let more = coverage.partial.len().saturating_sub(shown.len());
+                writeln!(
+                    f,
+                    "  partly covered: {}{}",
+                    shown.join(", "),
+                    if more > 0 { format!(" (+{more} more)") } else { String::new() }
+                )?;
+            }
+        }
+        if let Some(profraw) = &self.profraw {
+            writeln!(f, "  profraw written to {}", profraw.display())?;
+        }
+        if !self.covers.is_empty() {
+            let covers: Vec<String> = self
+                .covers
+                .iter()
+                .map(|(label, share)| format!("{label} {:.0}%", share * 100.0))
+                .collect();
+            writeln!(f, "  cover: {}", covers.join(", "))?;
         }
         if !self.discard_reasons.is_empty() {
             let reasons: Vec<String> = self

@@ -16,6 +16,9 @@ build/
 # Coverage and profiling artifacts produced by crabcheck-locate runs
 *.profraw
 *.profdata
-coverage/
+/coverage/
 profdata/
 jsondata/
+
+# workdirs of the old file-based locate pipeline
+examples/locate-demo/coverage/
