@@ -160,7 +160,8 @@ run.finish().assert_passed();
 
 Every step draws its randomness from the run, so a loop replays by seed;
 inputs from `draw` also carry a replay point of their own, mutants are
-remembered by their rendering. See `examples/custom_loop.rs`.
+remembered by their rendering. See
+[`examples/custom_loop.rs`](https://github.com/alpaylan/crabcheck/blob/main/crates/crabcheck/examples/custom_loop.rs).
 
 Shrinking is a step as well. `run.shrink()` runs the built-in driver on
 the failure whenever the loop likes, and `run.reproduces(&candidate)`
@@ -193,7 +194,9 @@ properties with hard preconditions. A pool of your own is an
 implementation of `SeedPool`. After a failure, `loops::localize` keeps
 testing mutants of the minimal failing input until the ranking of
 suspect functions (`run.suspects()`) stops changing. See
-`examples/shipped_loops.rs` and `examples/perf_fuzz.rs`.
+[`examples/shipped_loops.rs`](https://github.com/alpaylan/crabcheck/blob/main/crates/crabcheck/examples/shipped_loops.rs)
+and
+[`examples/perf_fuzz.rs`](https://github.com/alpaylan/crabcheck/blob/main/crates/crabcheck/examples/perf_fuzz.rs).
 
 ## Reproducing and steering runs
 
@@ -250,16 +253,17 @@ Minimum supported Rust version: 1.88.
 ## Status
 
 0.2 is a rewrite of the 0.1 research prototype and its API is not yet
-frozen. Coverage-guided search and fault localization now live in this
-crate behind the `coverage` feature; the 0.1 file-based pipeline in
-`crates/crabcheck-locate` is superseded and kept only for reference.
+frozen. Coverage-guided search and fault localization live in this crate
+behind the `coverage` feature; the 0.1 file-based pipeline in
+[`crates/crabcheck-locate`](https://github.com/alpaylan/crabcheck/tree/main/crates/crabcheck-locate)
+is superseded and kept only for reference.
 
-Planned: PerfFuzz-style search, where inputs that set a new maximum
-execution count on any counter are kept and the total path length is the
-score when the property reports none, with the hottest input and functions
-in the report. Today coverage-guided search rewards new code only (AFL
-hit-count classes saturate at 128), and performance search needs a
-hand-written `target` score.
+Planned: PerfFuzz proper, where inputs that set a new maximum execution
+count on any counter are kept and the total path length is the score
+when the property reports none, with the hottest input and functions in
+the report. Today `loops::perf_fuzz` climbs the property's measured
+time, and coverage-guided search rewards new code only (AFL hit-count
+classes saturate at 128).
 
 ## License
 

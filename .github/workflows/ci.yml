@@ -155,9 +155,12 @@ jobs:
   publish:
     name: Publish crabcheck
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [fmt, clippy, test, features, msrv, docs, package]
+    needs: [fmt, clippy, test, features, coverage, msrv, docs, package]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      # crabcheck depends on crabcheck-macros by exact version, so the
+      # macros crate goes first; cargo waits for it to be indexed.
+      - run: cargo publish -p crabcheck-macros --token ${{ secrets.REGISTRY_TOKEN }}
       - run: cargo publish -p crabcheck --token ${{ secrets.REGISTRY_TOKEN }}

@@ -52,7 +52,7 @@ dependencies = [
 
 [[package]]
 name = "crabcheck"
-version = "0.2.0-dev"
+version = "0.2.0"
 dependencies = [
  "crabcheck-macros",
  "insta",
@@ -83,7 +83,7 @@ dependencies = [
 
 [[package]]
 name = "crabcheck-macros"
-version = "0.2.0-dev"
+version = "0.2.0"
 dependencies = [
  "proc-macro2",
  "quote",

@@ -1,16 +1,19 @@
 [package]
 name = "crabcheck"
-description = "Property-based testing with choice-tree shrinking, targeted mutation, and seed replay, designed for tests written by coding agents"
-version = "0.2.0-dev"
+description = "Property-based testing built for coding agents: verified generators, shrinkers and mutators, seed replay, targeted and coverage-guided search, in-process coverage with fault localization, and testing loops written by hand"
+version = "0.2.0"
 edition = "2024"
 categories = ["development-tools::testing"]
-keywords = ["property-based-testing", "pbt", "quickcheck", "shrinking", "fuzzing"]
+keywords = ["property-testing", "pbt", "quickcheck", "shrinking", "fuzzing"]
 readme = "README.md"
 repository.workspace = true
 license.workspace = true
 authors.workspace = true
 rust-version.workspace = true
 include = ["src/**", "build.rs", "Cargo.toml", "README.md", "CHANGELOG.md", "LICENSE"]
+
+[package.metadata.docs.rs]
+features = ["coverage", "serve"]
 
 [features]
 default = ["json", "derive"]
@@ -37,7 +40,7 @@ required-features = ["serve"]
 rustc-demangle = { version = "0.1", optional = true }
 miniz_oxide = { version = "0.8", optional = true }
 object = { version = "0.40", optional = true, default-features = false, features = ["read", "std"] }
-crabcheck-macros = { version = "0.2.0-dev", path = "../crabcheck-macros", optional = true }
+crabcheck-macros = { version = "=0.2.0", path = "../crabcheck-macros", optional = true }
 rand_core = "0.9"
 rand_chacha = "0.9"
 serde = { version = "1.0", features = ["derive"], optional = true }

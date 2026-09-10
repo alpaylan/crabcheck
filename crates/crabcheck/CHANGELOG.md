@@ -3,7 +3,7 @@
 All notable changes to `crabcheck` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased] — 0.2.0
+## [0.2.0] — 2026-09-10
 
 A rewrite of the 0.1 research prototype around one idea: the author writes
 the generator, the support predicate, the shrinker and the mutator, and the
