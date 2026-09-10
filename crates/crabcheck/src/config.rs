@@ -49,6 +49,8 @@
 //! | `CRABCHECK_REGRESSIONS_DIR` | `regressions.dir` |
 //! | `CRABCHECK_TRUNCATE_DEBUG_AT` | `report.truncate_debug_at` |
 //! | `CRABCHECK_REPORT_JSON` | `report.json_path` |
+//! | `CRABCHECK_SAMPLES` | `report.samples` |
+//! | `CRABCHECK_OBSERVATIONS` | `report.observations` |
 
 use std::{
     fmt,
@@ -256,6 +258,18 @@ pub struct ReportConfig {
     /// Append each report as one JSON line to this file (needs the `json`
     /// feature). Default none.
     pub json_path: Option<PathBuf>,
+    /// How many passing inputs to show in the report: the smallest and the
+    /// largest by size, and a random sample of the rest. Default 5.
+    pub samples: usize,
+    /// Directory to append one observation file per property to, in the
+    /// OpenPBTStats JSON-lines format that
+    /// [Tyche](https://github.com/tyche-pbt/tyche-extension) visualises:
+    /// one `test_case` line per evaluated input with its status,
+    /// representation, origin, features, timing and, in instrumented
+    /// builds, the source lines it executed, followed by an `info` line
+    /// carrying the report. Renders every input, so it is opt-in. Needs the
+    /// `json` feature. Default none.
+    pub observations: Option<PathBuf>,
 }
 
 impl Default for Config {
@@ -301,7 +315,7 @@ impl Default for RegressionsConfig {
 
 impl Default for ReportConfig {
     fn default() -> Self {
-        ReportConfig { truncate_debug_at: 2_000, json_path: None }
+        ReportConfig { truncate_debug_at: 2_000, json_path: None, samples: 5, observations: None }
     }
 }
 
@@ -566,6 +580,10 @@ impl Config {
                     })
                 },
                 "CRABCHECK_REPORT_JSON" => self.report.json_path = Some(PathBuf::from(value)),
+                "CRABCHECK_OBSERVATIONS" => self.report.observations = Some(PathBuf::from(value)),
+                "CRABCHECK_SAMPLES" => {
+                    parse("an integer", &mut |v| v.parse().map(|n| self.report.samples = n).is_ok())
+                },
                 other => {
                     problems.push(format!(
                         "{other} is not a crabcheck setting (see crabcheck::config); ignored"

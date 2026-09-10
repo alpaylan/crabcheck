@@ -6,10 +6,13 @@ crabcheck: FAILED, property panicked: planted: too large
   at crates/crabcheck/tests/reports/planted.rs:[L:C]
   counterexample: 1001
   original:       1620 (size 66, iteration 1)
-  shrinking: 6 of 38 candidates accepted in [ms]
-  after 1 passing tests (0 discarded) in [ms]
+  shrinking: 6 of 38 candidates accepted in [time]
+  after 1 passing tests (1 distinct, 0 discarded) in [time]
   reproduce: CRABCHECK_REPLAY=24301:1
   or rerun the whole search: Config::default().seed(24301)
   coverage: 1 of 1 functions in `reports::planted` reached, 4 of 4 counters
   suspects (68 passing and 36 failing runs over 9 regions):
     1. tests/reports/planted.rs:5-15 in `reports::planted::classify`  ochiai=1.00 delta=1.00  HIGH panic-site (singleton_panic_overlap)
+  timing: property median [time], p90 [time], max [time]; generation median [time], p90 [time], max [time]
+    slowest input: [input]
+  sample (random, iteration 0, size 93): 117

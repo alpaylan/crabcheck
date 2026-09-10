@@ -2,5 +2,14 @@
 source: crates/crabcheck/tests/reports/main.rs
 expression: report.to_string()
 ---
-crabcheck: ok, 298 tests passed (0 discarded) in [ms], seed 24301
+crabcheck: ok, 298 tests passed (254 distinct, 0 discarded) in [time], seed 24301
   target: best score 36 reached by [9, 9, 9, 9] (100 mutated inputs, 6 improvements)
+  feature target: 298 values, min 6, median 22, p90 33, max 36
+    histogram: 6-9 3%, 10-13 10%, 14-17 18%, 18-21 19%, 22-25 14%, 26-29 8%, 30-33 20%, 34-36 7%
+  timing: property median [time], p90 [time], max [time]; generation median [time], p90 [time], max [time]
+    slowest input: [input]
+  sample (random, iteration 18, size 0): [9, 0, 9, 8]
+  sample (random, iteration 4, size 100): [0, 0, 8, 8]
+  sample (mutation, iteration 253, size 13): [9, 9, 7, 7]
+  sample (random, iteration 31, size 83): [8, 4, 6, 7]
+  sample (random, iteration 104, size 6): [9, 1, 0, 3]

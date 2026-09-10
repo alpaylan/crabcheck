@@ -6,6 +6,7 @@ expression: "serde_json::to_string_pretty(&report).expect(\"report serializes\")
   "status": "Failed",
   "seed": 24301,
   "tests": 1,
+  "unique_tests": 1,
   "discarded": 0,
   "iterations": 2,
   "stopped_by_budget": false,
@@ -15,6 +16,40 @@ expression: "serde_json::to_string_pretty(&report).expect(\"report serializes\")
   "gen_time": "[duration]",
   "prop_time": "[duration]",
   "distinct_inputs_ratio": 1.0,
+  "distinct_growth": {
+    "points": [
+      [
+        1,
+        1
+      ],
+      [
+        2,
+        2
+      ]
+    ]
+  },
+  "features": {},
+  "timing": {
+    "prop": {
+      "median": "[duration]",
+      "p90": "[duration]",
+      "max": "[duration]"
+    },
+    "generation": {
+      "median": "[duration]",
+      "p90": "[duration]",
+      "max": "[duration]"
+    },
+    "slowest": "[input]"
+  },
+  "samples": [
+    {
+      "debug": "117",
+      "origin": "random",
+      "size": 93,
+      "iteration": 0
+    }
+  ],
   "failure": {
     "kind": "Panic",
     "message": "planted: too large",
@@ -70,7 +105,23 @@ expression: "serde_json::to_string_pretty(&report).expect(\"report serializes\")
     "novel_inputs": 3,
     "last_novelty_at": 63,
     "unreached": [],
-    "partial": []
+    "partial": [],
+    "growth": {
+      "points": [
+        [
+          1,
+          2
+        ],
+        [
+          3,
+          3
+        ],
+        [
+          64,
+          4
+        ]
+      ]
+    }
   },
   "locate": {
     "passing": 68,

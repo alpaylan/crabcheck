@@ -32,8 +32,10 @@ pub(crate) fn assess(report: &mut Report, config: &Config) {
         report.warn(
             "low_distinct_inputs",
             format!(
-                "only {:.0}% of generated inputs were distinct; the generator's space is small or max_size ({}) is too low",
+                "only {:.0}% of generated inputs were distinct and the last new one appeared at input {}; \
+                 the generator's space is small or max_size ({}) is too low",
                 report.distinct_inputs_ratio * 100.0,
+                report.distinct_growth.points.last().map_or(0, |p| p.0),
                 config.max_size
             ),
         );

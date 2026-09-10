@@ -97,6 +97,26 @@ library verifies them and makes every failure reproducible from its seed.
   pipeline of `crabcheck-locate` (seconds per run instead of minutes).
   Nightly's `-Z coverage-options=branch` adds true/false branch regions
   that the spectrum scores as separate arms.
+- `feature(name, value)`: numbers are summarised over the passing tests
+  (count, min, median, p90, max, histogram) in `Report::features` and the
+  text report; text values count like labels named `name=value`; `target`
+  scores appear as the feature `target`. The report also carries
+  `unique_tests` (distinct passing inputs, shown next to the test count),
+  `distinct_growth` and `coverage.growth` series (distinct inputs and
+  counters hit against inputs generated, for saturation curves),
+  `timing` (median, p90 and max of per-input property and generation time,
+  with the slowest input) and `samples` (the smallest, the largest and a
+  random sample of the passing inputs, `Config::report.samples`, default
+  5). These are the measures Tyche's interface is built on.
+- `Config::report.observations` / `CRABCHECK_OBSERVATIONS=dir`: one
+  observation file per property in the OpenPBTStats JSON-lines format
+  that Tyche visualises. Every evaluated input (random, explore,
+  mutation, replay, regression, shrink candidate, localization
+  neighbour, and the minimal failing input last) becomes a `test_case`
+  line with status, representation,
+  origin, features (labels, `feature` values, `cover:` outcomes,
+  `target`), timing and, in instrumented builds, the source lines it
+  executed; an `info` line carries the report.
 - `cover(condition, label)`: records how often a condition held across
   passing tests; `Report::covers` carries the shares and a `cover`
   warning fires when a label is met by fewer than

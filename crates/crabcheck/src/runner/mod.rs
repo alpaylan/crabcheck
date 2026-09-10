@@ -104,9 +104,13 @@ where
         run.report.warn("config_env", problem);
     }
     let _coverage_guard = run.enable_coverage();
+    #[cfg(not(feature = "json"))]
+    if config.report.observations.is_some() {
+        run.report.warn("observations", "observation files need the `json` feature");
+    }
 
     if let Some(point) = config.replay {
-        let attempt = run.run_point(point);
+        let attempt = run.run_point(point, crate::report::Origin::Replay);
         let reproduced = matches!(attempt, Attempt::Failed { .. });
         run.report.replay = Some(ReplayOutcome { point, reproduced });
         if let Attempt::Failed { size, result } = attempt
@@ -149,7 +153,19 @@ where
                 continue;
             }
             let size = size_for(point.seed, point.iteration, config.max_size);
-            let (result, _) = run.evaluate(value.clone());
+            let (result, observed, elapsed) = run.evaluate(value.clone());
+            run.observe(ObservationLine {
+                origin: "regression",
+                seed: point.seed,
+                iteration: point.iteration,
+                size,
+                representation: debug.clone(),
+                result: &result,
+                observed: Some(&observed),
+                generate: std::time::Duration::ZERO,
+                execute: elapsed,
+                coverage: None,
+            });
             if Signature::of(&result).is_some() {
                 run.fail(
                     Found { value, point: Some(point), size, iteration: point.iteration, result },
@@ -307,18 +323,25 @@ impl CoverageState {
         self.tracker.as_ref().and_then(|t| t.begin())
     }
 
-    /// Record what an input did; returns whether it reached new coverage.
-    /// Passing runs and runs failing like the first failure feed the
-    /// spectrum; discards and other failures do not.
+    /// Record what an input did: whether it reached new coverage and, when
+    /// asked, the source lines it executed. Passing runs and runs failing
+    /// like the first failure feed the spectrum; discards and other failures
+    /// do not.
     fn end(
         &mut self,
         before: Option<crate::coverage::Snapshot>,
         result: &Result<Outcome, PanicInfo>,
-    ) -> bool {
+        want_lines: bool,
+    ) -> Covered {
         let (Some(tracker), Some(before)) = (self.tracker.as_mut(), before) else {
-            return false;
+            return Covered::default();
         };
         let observation = tracker.end(&before);
+        let lines = if want_lines {
+            crate::coverage::lines_hit(&observation.delta, tracker.selected())
+        } else {
+            None
+        };
         if let Some(spectrum) = self.spectrum.as_mut() {
             match Signature::of(result) {
                 None => {
@@ -340,8 +363,15 @@ impl CoverageState {
                 },
             }
         }
-        observation.novel
+        Covered { novel: observation.novel, lines }
     }
+}
+
+/// What [`CoverageState::end`] learned about one input.
+#[derive(Default)]
+struct Covered {
+    novel: bool,
+    lines: Option<BTreeMap<String, Vec<u32>>>,
 }
 
 #[cfg(not(feature = "coverage"))]
@@ -357,8 +387,13 @@ impl CoverageState {
         None
     }
 
-    fn end(&mut self, _before: Option<()>, _result: &Result<Outcome, PanicInfo>) -> bool {
-        false
+    fn end(
+        &mut self,
+        _before: Option<()>,
+        _result: &Result<Outcome, PanicInfo>,
+        _want_lines: bool,
+    ) -> Covered {
+        Covered::default()
     }
 }
 
@@ -405,6 +440,289 @@ struct Run<'a, G: Gen, P> {
     coverage: CoverageState,
     /// `cover` labels: (times met, times seen) over passing tests.
     covers: BTreeMap<String, (u64, u64)>,
+    stats: Stats,
+    /// Observation lines for Tyche, when `Config::report.observations` is set.
+    observations: Option<Observations>,
+    /// Generation time of the latest input, for its observation line.
+    last_gen: std::time::Duration,
+}
+
+/// One evaluated input, as recorded in the observation file.
+#[cfg_attr(not(feature = "json"), allow(dead_code))]
+struct ObservationLine<'a> {
+    origin: &'static str,
+    seed: u64,
+    iteration: u64,
+    size: usize,
+    representation: String,
+    result: &'a Result<Outcome, PanicInfo>,
+    observed: Option<&'a labels::Observed>,
+    generate: std::time::Duration,
+    execute: std::time::Duration,
+    coverage: Option<BTreeMap<String, Vec<u32>>>,
+}
+
+/// The OpenPBTStats lines of one run (see `Config::report.observations`).
+#[cfg(feature = "json")]
+struct Observations {
+    run_start: f64,
+    property: String,
+    lines: Vec<String>,
+}
+
+#[cfg(feature = "json")]
+impl Observations {
+    fn new(property: String) -> Observations {
+        let run_start = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0.0, |d| d.as_secs_f64());
+        Observations { run_start, property, lines: Vec::new() }
+    }
+
+    fn record(&mut self, line: ObservationLine<'_>) {
+        use serde_json::json;
+        let (status, reason) = match line.result {
+            Ok(Outcome::Pass) => ("passed", String::new()),
+            Ok(Outcome::Discard(reason)) => ("gave_up", reason.clone()),
+            Ok(Outcome::False) => ("failed", "the property returned false".to_string()),
+            Ok(Outcome::Fail(message)) => ("failed", message.clone()),
+            Err(info) => {
+                (
+                    "failed",
+                    match &info.location {
+                        Some(at) => format!("panicked at {at}: {}", info.message),
+                        None => format!("panicked: {}", info.message),
+                    },
+                )
+            },
+        };
+        let mut features = serde_json::Map::new();
+        if let Some(observed) = line.observed {
+            for label in &observed.labels {
+                features.insert(label.clone(), json!(""));
+            }
+            for (name, value) in &observed.features {
+                let value = match value {
+                    labels::FeatureValue::Number(n) => json!(n),
+                    labels::FeatureValue::Text(t) => json!(t),
+                };
+                features.insert(name.clone(), value);
+            }
+            for (label, met) in &observed.covers {
+                features.insert(format!("cover:{label}"), json!(met.to_string()));
+            }
+            if let Some(score) = observed.score {
+                features.insert("target".to_string(), json!(score));
+            }
+        }
+        let record = json!({
+            "type": "test_case",
+            "run_start": self.run_start,
+            "property": self.property,
+            "status": status,
+            "status_reason": reason,
+            "representation": line.representation,
+            "how_generated": line.origin,
+            "features": features,
+            "coverage": line.coverage,
+            "timing": {
+                "generate:input": line.generate.as_secs_f64(),
+                "execute:test": line.execute.as_secs_f64(),
+            },
+            "metadata": {
+                "seed": line.seed,
+                "iteration": line.iteration,
+                "size": line.size,
+                "origin": line.origin,
+            },
+        });
+        self.lines.push(record.to_string());
+    }
+
+    fn info(&mut self, title: &str, content: &str) {
+        let record = serde_json::json!({
+            "type": "info",
+            "run_start": self.run_start,
+            "property": self.property,
+            "title": title,
+            "content": content,
+        });
+        self.lines.push(record.to_string());
+    }
+
+    /// Append the lines to `<dir>/<property>.jsonl`.
+    fn write(&self, dir: &std::path::Path) -> std::io::Result<std::path::PathBuf> {
+        use std::io::Write as _;
+        std::fs::create_dir_all(dir)?;
+        let path = dir.join(crate::regressions::file_name(&self.property));
+        let mut file = std::fs::OpenOptions::new().create(true).append(true).open(&path)?;
+        for line in &self.lines {
+            writeln!(file, "{line}")?;
+        }
+        Ok(path)
+    }
+}
+
+#[cfg(not(feature = "json"))]
+struct Observations;
+
+#[cfg(not(feature = "json"))]
+impl Observations {
+    fn record(&mut self, _line: ObservationLine<'_>) {}
+}
+
+/// Where a sampled or slow input can be rendered from later.
+#[derive(Clone)]
+enum Provenance {
+    /// Regenerate from the point (random-phase inputs).
+    Point(ReplayPoint),
+    /// Already rendered (mutants).
+    Debug(String),
+}
+
+#[derive(Clone)]
+struct Candidate {
+    origin: crate::report::Origin,
+    size: usize,
+    iteration: u64,
+    /// The uniform draw that decided its reservoir slot; kept so workers'
+    /// candidates can be re-considered when runs merge.
+    r: f64,
+    source: Provenance,
+}
+
+/// The inputs shown as samples: the smallest and largest by size plus a
+/// reservoir sample of the rest.
+struct Samples {
+    limit: usize,
+    smallest: Option<Candidate>,
+    largest: Option<Candidate>,
+    reservoir: Vec<Candidate>,
+    seen: u64,
+}
+
+impl Samples {
+    fn new(limit: usize) -> Samples {
+        Samples { limit, smallest: None, largest: None, reservoir: Vec::new(), seen: 0 }
+    }
+
+    /// Offer a passing input; `source` is only called when it is kept.
+    fn consider(
+        &mut self,
+        size: usize,
+        iteration: u64,
+        origin: crate::report::Origin,
+        r: f64,
+        source: impl FnOnce() -> Provenance,
+    ) {
+        if self.limit == 0 {
+            return;
+        }
+        self.seen += 1;
+        let smaller = self.smallest.as_ref().is_none_or(|c| size < c.size);
+        let larger = self.limit >= 2 && self.largest.as_ref().is_none_or(|c| size > c.size);
+        let k = self.limit.saturating_sub(2);
+        let slot = if k == 0 {
+            None
+        } else if self.reservoir.len() < k {
+            Some(self.reservoir.len())
+        } else {
+            let j = (r * self.seen as f64) as usize;
+            (j < k).then_some(j)
+        };
+        if !(smaller || larger || slot.is_some()) {
+            return;
+        }
+        let candidate = Candidate { origin, size, iteration, r, source: source() };
+        if smaller {
+            self.smallest = Some(candidate.clone());
+        }
+        if larger {
+            self.largest = Some(candidate.clone());
+        }
+        match slot {
+            Some(j) if j < self.reservoir.len() => self.reservoir[j] = candidate,
+            Some(_) => self.reservoir.push(candidate),
+            None => {},
+        }
+    }
+
+    /// Everything kept, smallest first, without repeats.
+    fn drain(&mut self) -> Vec<Candidate> {
+        let mut out: Vec<Candidate> = Vec::new();
+        for candidate in self
+            .smallest
+            .take()
+            .into_iter()
+            .chain(self.largest.take())
+            .chain(self.reservoir.drain(..))
+        {
+            if !out
+                .iter()
+                .any(|c| c.origin == candidate.origin && c.iteration == candidate.iteration)
+            {
+                out.push(candidate);
+            }
+        }
+        out
+    }
+}
+
+/// Per-run accumulators behind the report's distributions.
+struct Stats {
+    /// Debug hashes of passing inputs.
+    passed_seen: HashSet<u64>,
+    /// Numeric feature values over passing tests.
+    features: BTreeMap<String, Vec<f64>>,
+    gen_micros: Vec<u32>,
+    prop_micros: Vec<u32>,
+    slowest: Option<(u32, Provenance)>,
+    distinct_growth: crate::report::Series,
+    samples: Samples,
+}
+
+impl Stats {
+    fn new(samples: usize) -> Stats {
+        Stats {
+            passed_seen: HashSet::new(),
+            features: BTreeMap::new(),
+            gen_micros: Vec::new(),
+            prop_micros: Vec::new(),
+            slowest: None,
+            distinct_growth: crate::report::Series::default(),
+            samples: Samples::new(samples),
+        }
+    }
+
+    /// Note an input's property time; `source` is only called for a new
+    /// maximum.
+    fn slower(&mut self, elapsed: std::time::Duration, source: impl FnOnce() -> Provenance) {
+        let micros = micros(elapsed);
+        if self.slowest.as_ref().is_none_or(|(best, _)| micros > *best) {
+            self.slowest = Some((micros, source()));
+        }
+    }
+}
+
+/// Samples are for reading, so they are cut shorter than counterexamples.
+const SAMPLE_CHARS: usize = 200;
+
+/// Cut a rendering to `limit` characters, marking the cut.
+fn cap(mut debug: String, limit: usize) -> String {
+    if let Some((cut, _)) = debug.char_indices().nth(limit) {
+        debug.truncate(cut);
+        debug.push('…');
+    }
+    debug
+}
+
+fn micros(d: std::time::Duration) -> u32 {
+    d.as_micros().min(u128::from(u32::MAX)) as u32
+}
+
+/// A uniform draw in `[0, 1)` from a seed and an index.
+fn hash_u01(seed: u64, index: u64) -> f64 {
+    (mix(seed, index) >> 11) as f64 / (1u64 << 53) as f64
 }
 
 /// A failing input found by the random or targeted phase.
@@ -420,10 +738,10 @@ struct Found<T> {
 enum Attempt {
     Passed {
         size: usize,
-        labels: Vec<String>,
-        score: Option<f64>,
+        /// Debug hash of the input.
+        hash: u64,
+        observed: labels::Observed,
         novel: bool,
-        covers: Vec<(String, bool)>,
     },
     Discarded(String),
     Failed {
@@ -441,6 +759,8 @@ where
     P: FnMut(G::Value) -> R,
 {
     fn new(config: &'a Config, generator: &'a G, property: P, seed: u64, name: String) -> Self {
+        #[cfg(feature = "json")]
+        let name_for_observations = name.clone();
         Run {
             config,
             generator,
@@ -454,6 +774,16 @@ where
             pool: Pool::new(config.target.pool_size, config.target.energy),
             coverage: CoverageState::new(),
             covers: BTreeMap::new(),
+            stats: Stats::new(config.report.samples),
+            #[cfg(feature = "json")]
+            observations: config
+                .report
+                .observations
+                .as_ref()
+                .map(|_| Observations::new(name_for_observations)),
+            #[cfg(not(feature = "json"))]
+            observations: None,
+            last_gen: std::time::Duration::ZERO,
         }
     }
 
@@ -464,7 +794,10 @@ where
             .with_filter_max_attempts(self.config.filter_max_attempts);
         let started = Instant::now();
         let generated = panic::catch(|| self.generator.generate(&mut source));
-        self.report.gen_time += started.elapsed();
+        let elapsed = started.elapsed();
+        self.report.gen_time += elapsed;
+        self.stats.gen_micros.push(micros(elapsed));
+        self.last_gen = elapsed;
         match generated {
             Err(info) => Err(Attempt::GenPanicked(info)),
             Ok(_) if source.discarded().is_some() => {
@@ -480,35 +813,84 @@ where
     }
 
     /// Run the property once. Accumulates property time.
-    fn evaluate(&mut self, value: G::Value) -> (Result<Outcome, PanicInfo>, labels::Observed) {
+    fn evaluate(
+        &mut self,
+        value: G::Value,
+    ) -> (Result<Outcome, PanicInfo>, labels::Observed, std::time::Duration) {
         let started = Instant::now();
-        let outcome = evaluate(&mut self.property, value);
-        self.report.prop_time += started.elapsed();
-        outcome
+        let (result, observed) = evaluate(&mut self.property, value);
+        let elapsed = started.elapsed();
+        self.report.prop_time += elapsed;
+        self.stats.prop_micros.push(micros(elapsed));
+        (result, observed, elapsed)
+    }
+
+    /// Add a line to the observation file, when one is being written.
+    fn observe(&mut self, line: ObservationLine<'_>) {
+        if let Some(observations) = self.observations.as_mut() {
+            observations.record(line);
+        }
+    }
+
+    /// Count a generated input, and the growth of the distinct set.
+    fn note_distinct(&mut self, hash: u64) {
+        if self.seen.insert(hash) {
+            self.stats.distinct_growth.push(self.generated, self.seen.len() as u64);
+        }
     }
 
     /// Generate the input at `point` and run the property on it. Counts
     /// nothing; callers decide what the attempt means.
-    fn run_point(&mut self, point: ReplayPoint) -> Attempt {
+    fn run_point(&mut self, point: ReplayPoint, origin: crate::report::Origin) -> Attempt {
+        let observing = self.observations.is_some();
         let (value, size) = match self.generate(point) {
             Ok(generated) => generated,
-            Err(attempt) => return attempt,
+            Err(attempt) => {
+                if let Attempt::Discarded(reason) = &attempt
+                    && observing
+                {
+                    let result = Ok(Outcome::Discard(reason.clone()));
+                    self.observe(ObservationLine {
+                        origin: origin.as_str(),
+                        seed: point.seed,
+                        iteration: point.iteration,
+                        size: size_for(point.seed, point.iteration, self.config.max_size),
+                        representation: String::new(),
+                        result: &result,
+                        observed: None,
+                        generate: self.last_gen,
+                        execute: std::time::Duration::ZERO,
+                        coverage: None,
+                    });
+                }
+                return attempt;
+            },
         };
         self.generated += 1;
-        self.seen.insert(debug_hash(&value));
+        let hash = debug_hash(&value);
+        self.note_distinct(hash);
+        let representation = if observing { render(&value, usize::MAX).0 } else { String::new() };
         let before = self.coverage.begin();
-        let (result, observed) = self.evaluate(value);
-        let novel = self.coverage.end(before, &result);
+        let (result, observed, elapsed) = self.evaluate(value);
+        let covered = self.coverage.end(before, &result, observing);
+        let novel = covered.novel;
+        self.stats.slower(elapsed, || Provenance::Point(point));
+        if observing {
+            self.observe(ObservationLine {
+                origin: origin.as_str(),
+                seed: point.seed,
+                iteration: point.iteration,
+                size,
+                representation,
+                result: &result,
+                observed: Some(&observed),
+                generate: self.last_gen,
+                execute: elapsed,
+                coverage: covered.lines,
+            });
+        }
         match result {
-            Ok(Outcome::Pass) => {
-                Attempt::Passed {
-                    size,
-                    labels: observed.labels,
-                    score: observed.score,
-                    novel,
-                    covers: observed.covers,
-                }
-            },
+            Ok(Outcome::Pass) => Attempt::Passed { size, hash, observed, novel },
             Ok(Outcome::Discard(reason)) => Attempt::Discarded(reason),
             result => Attempt::Failed { size, result },
         }
@@ -519,17 +901,41 @@ where
         *self.report.discard_reasons.entry(reason).or_default() += 1;
     }
 
-    fn record_pass(&mut self, size: usize, labels: Vec<String>, covers: Vec<(String, bool)>) {
+    fn record_pass(
+        &mut self,
+        size: usize,
+        hash: u64,
+        observed: labels::Observed,
+        origin: crate::report::Origin,
+        iteration: u64,
+        source: impl FnOnce() -> Provenance,
+    ) {
         self.report.tests += 1;
+        self.stats.passed_seen.insert(hash);
         *self.report.sizes.entry(size).or_default() += 1;
-        for label in labels {
+        for label in observed.labels {
             *self.report.labels.entry(label).or_default() += 1;
         }
-        for (label, met) in covers {
+        for (label, met) in observed.covers {
             let entry = self.covers.entry(label).or_insert((0, 0));
             entry.0 += u64::from(met);
             entry.1 += 1;
         }
+        for (name, value) in observed.features {
+            match value {
+                labels::FeatureValue::Number(n) => {
+                    self.stats.features.entry(name).or_default().push(n);
+                },
+                labels::FeatureValue::Text(text) => {
+                    *self.report.labels.entry(format!("{name}={text}")).or_default() += 1;
+                },
+            }
+        }
+        if let Some(score) = observed.score {
+            self.stats.features.entry("target".to_string()).or_default().push(score);
+        }
+        let r = hash_u01(self.seed ^ 0x5a5a_5a5a, self.report.tests);
+        self.stats.samples.consider(size, iteration, origin, r, source);
     }
 
     /// Whether coverage-guided search is on and coverage is being collected.
@@ -642,7 +1048,7 @@ where
             let iteration = self.report.iterations;
             self.report.iterations += 1;
             let point = ReplayPoint { seed: self.seed, iteration };
-            match self.run_point(point) {
+            match self.run_point(point, crate::report::Origin::Random) {
                 Attempt::GenPanicked(info) => {
                     self.report.status = Status::Aborted;
                     self.report.abort =
@@ -650,8 +1056,16 @@ where
                     return None;
                 },
                 Attempt::Discarded(reason) => self.record_discard(reason),
-                Attempt::Passed { size, labels, score, novel, covers } => {
-                    self.record_pass(size, labels, covers);
+                Attempt::Passed { size, hash, observed, novel } => {
+                    let score = observed.score;
+                    self.record_pass(
+                        size,
+                        hash,
+                        observed,
+                        crate::report::Origin::Random,
+                        iteration,
+                        || Provenance::Point(point),
+                    );
                     self.keep_if_interesting(point, score, novel);
                 },
                 Attempt::Failed { size, result } => {
@@ -713,6 +1127,33 @@ where
         for seed in other.pool.drain() {
             self.pool.add(seed.value, seed.score);
         }
+        self.stats.passed_seen.extend(other.stats.passed_seen);
+        for (name, mut values) in other.stats.features {
+            self.stats.features.entry(name).or_default().append(&mut values);
+        }
+        self.stats.gen_micros.append(&mut other.stats.gen_micros);
+        self.stats.prop_micros.append(&mut other.stats.prop_micros);
+        if let Some((micros, source)) = other.stats.slowest.take() {
+            self.stats.slower(std::time::Duration::from_micros(u64::from(micros)), || source);
+        }
+        for c in other.stats.samples.drain() {
+            self.stats.samples.consider(c.size, c.iteration, c.origin, c.r, || c.source);
+        }
+        #[cfg(feature = "json")]
+        if let (Some(mine), Some(theirs)) = (self.observations.as_mut(), other.observations.take())
+        {
+            mine.lines.extend(theirs.lines);
+        }
+    }
+
+    /// Render an input kept by provenance; `None` when it can no longer be
+    /// regenerated.
+    fn render_provenance(&mut self, source: Provenance) -> Option<String> {
+        let limit = self.config.report.truncate_debug_at;
+        match source {
+            Provenance::Debug(debug) => Some(debug),
+            Provenance::Point(point) => self.regenerate(point).map(|value| render(&value, limit).0),
+        }
     }
 
     /// The targeted phase: mutate the best-scoring inputs to push the score
@@ -744,7 +1185,7 @@ where
 
             if u01(&mut rng) < config.target.explore {
                 let point = ReplayPoint { seed: self.seed, iteration };
-                match self.run_point(point) {
+                match self.run_point(point, crate::report::Origin::Explore) {
                     Attempt::GenPanicked(info) => {
                         self.report.status = Status::Aborted;
                         self.report.abort = Some(Abort {
@@ -758,8 +1199,16 @@ where
                         discarded += 1;
                         self.record_discard(reason);
                     },
-                    Attempt::Passed { size, labels, score, novel, covers } => {
-                        self.record_pass(size, labels, covers);
+                    Attempt::Passed { size, hash, observed, novel } => {
+                        let score = observed.score;
+                        self.record_pass(
+                            size,
+                            hash,
+                            observed,
+                            crate::report::Origin::Explore,
+                            iteration,
+                            || Provenance::Point(point),
+                        );
                         self.keep_if_interesting(point, score, novel);
                     },
                     Attempt::Failed { size, result } => {
@@ -779,6 +1228,7 @@ where
             let size = size_for(self.seed, iteration, config.max_size);
             let mut source = Source::new(mix(self.seed, iteration), size)
                 .with_filter_max_attempts(config.filter_max_attempts);
+            let mutating = Instant::now();
             let mutant = match panic::catch(|| self.generator.mutate(&seed.value, &mut source)) {
                 Ok(Some(mutant)) => mutant,
                 Ok(None) => continue,
@@ -789,16 +1239,44 @@ where
                     break;
                 },
             };
+            let mutated_in = mutating.elapsed();
             self.generated += 1;
-            self.seen.insert(debug_hash(&mutant));
+            let hash = debug_hash(&mutant);
+            self.note_distinct(hash);
+            let observing = self.observations.is_some();
             let before = self.coverage.begin();
-            let (result, observed) = self.evaluate(mutant.clone());
-            let novel = self.coverage.end(before, &result);
+            let (result, observed, elapsed) = self.evaluate(mutant.clone());
+            let covered = self.coverage.end(before, &result, observing);
+            let novel = covered.novel;
+            let limit = config.report.truncate_debug_at;
+            self.stats.slower(elapsed, || Provenance::Debug(render(&mutant, limit).0));
+            if observing {
+                self.observe(ObservationLine {
+                    origin: "mutation",
+                    seed: self.seed,
+                    iteration,
+                    size,
+                    representation: render(&mutant, usize::MAX).0,
+                    result: &result,
+                    observed: Some(&observed),
+                    generate: mutated_in,
+                    execute: elapsed,
+                    coverage: covered.lines,
+                });
+            }
             match result {
                 Ok(Outcome::Pass) => {
-                    self.record_pass(size, observed.labels, observed.covers);
+                    let score = observed.score;
+                    self.record_pass(
+                        size,
+                        hash,
+                        observed,
+                        crate::report::Origin::Mutation,
+                        iteration,
+                        || Provenance::Debug(render(&mutant, limit).0),
+                    );
                     let guided = self.guided();
-                    match observed.score {
+                    match score {
                         Some(score) if self.pool.improves(score) => {
                             self.pool.add(mutant, score);
                         },
@@ -855,15 +1333,36 @@ where
             let generator = self.generator;
             let property = &mut self.property;
             let coverage = &mut self.coverage;
+            let observations = &mut self.observations;
+            let seed = self.seed;
             let started = Instant::now();
             let result = shrink::shrink(
                 &config.shrink,
                 found.value.clone(),
                 |value| generator.shrink(value),
                 |candidate| {
+                    let observing = observations.is_some();
+                    let representation =
+                        if observing { render(&candidate, usize::MAX).0 } else { String::new() };
                     let before = coverage.begin();
-                    let outcome = evaluate(property, candidate).0;
-                    coverage.end(before, &outcome);
+                    let ran = Instant::now();
+                    let (outcome, observed) = evaluate(property, candidate);
+                    let elapsed = ran.elapsed();
+                    let covered = coverage.end(before, &outcome, observing);
+                    if let Some(observations) = observations.as_mut() {
+                        observations.record(ObservationLine {
+                            origin: "shrink",
+                            seed,
+                            iteration: found.iteration,
+                            size: found.size,
+                            representation,
+                            result: &outcome,
+                            observed: Some(&observed),
+                            generate: std::time::Duration::ZERO,
+                            execute: elapsed,
+                            coverage: covered.lines,
+                        });
+                    }
                     (Signature::of(&outcome).as_ref() == Some(&signature)).then(|| {
                         let (_, message, location) = details(outcome);
                         (message, location)
@@ -905,17 +1404,52 @@ where
             for i in 0..config.locate.neighbourhood as u64 {
                 let mut source = Source::new(mix(neighbourhood, i), found.size);
                 if let Some(mutant) = self.generator.mutate(&minimal, &mut source) {
+                    let observing = self.observations.is_some();
+                    let representation =
+                        if observing { render(&mutant, usize::MAX).0 } else { String::new() };
                     let before = self.coverage.begin();
-                    let result = self.evaluate(mutant).0;
-                    self.coverage.end(before, &result);
+                    let (result, observed, elapsed) = self.evaluate(mutant);
+                    let covered = self.coverage.end(before, &result, observing);
+                    if observing {
+                        self.observe(ObservationLine {
+                            origin: "neighbourhood",
+                            seed: self.seed,
+                            iteration: found.iteration,
+                            size: found.size,
+                            representation,
+                            result: &result,
+                            observed: Some(&observed),
+                            generate: std::time::Duration::ZERO,
+                            execute: elapsed,
+                            coverage: covered.lines,
+                        });
+                    }
                 }
             }
             let panic = location.as_ref().map(|l| (l.file.as_str(), l.line));
             self.report.locate =
                 self.coverage.spectrum.as_ref().map(|s| s.rank(panic, config.locate.top));
         }
-        #[cfg(not(feature = "coverage"))]
-        let _ = minimal;
+        // Like Hypothesis's "minimal failing case", the observation file ends
+        // with the shrunk input, run once more so Tyche lists it first.
+        if self.observations.is_some() && !flaky {
+            let representation = render(&minimal, usize::MAX).0;
+            let before = self.coverage.begin();
+            let (result, observed, elapsed) = self.evaluate(minimal.clone());
+            let covered = self.coverage.end(before, &result, true);
+            self.observe(ObservationLine {
+                origin: "minimal",
+                seed: self.seed,
+                iteration: found.iteration,
+                size: found.size,
+                representation,
+                result: &result,
+                observed: Some(&observed),
+                generate: std::time::Duration::ZERO,
+                execute: elapsed,
+                coverage: covered.lines,
+            });
+        }
 
         #[cfg(feature = "json")]
         if config.regressions.save
@@ -967,6 +1501,38 @@ where
         self.report.duration = self.started.elapsed();
         self.report.distinct_inputs_ratio =
             if self.generated == 0 { 1.0 } else { self.seen.len() as f64 / self.generated as f64 };
+        self.report.unique_tests = self.stats.passed_seen.len() as u64;
+        self.report.distinct_growth = std::mem::take(&mut self.stats.distinct_growth);
+        for (name, values) in std::mem::take(&mut self.stats.features) {
+            if !values.is_empty() {
+                self.report.features.insert(name, crate::report::FeatureSummary::of(values));
+            }
+        }
+        // Quantiles before any regeneration below adds to the timings.
+        let prop = crate::report::DurationStats::of(std::mem::take(&mut self.stats.prop_micros));
+        let generation =
+            crate::report::DurationStats::of(std::mem::take(&mut self.stats.gen_micros));
+        if let Some(prop) = prop {
+            let zero = std::time::Duration::ZERO;
+            let generation = generation.unwrap_or(crate::report::DurationStats {
+                median: zero,
+                p90: zero,
+                max: zero,
+            });
+            let slowest =
+                self.stats.slowest.take().and_then(|(_, source)| self.render_provenance(source));
+            self.report.timing = Some(crate::report::Timing { prop, generation, slowest });
+        }
+        for candidate in self.stats.samples.drain() {
+            if let Some(debug) = self.render_provenance(candidate.source) {
+                self.report.samples.push(crate::report::Sample {
+                    debug: cap(debug, SAMPLE_CHARS),
+                    origin: candidate.origin,
+                    size: candidate.size,
+                    iteration: candidate.iteration,
+                });
+            }
+        }
         for (label, (met, total)) in &self.covers {
             let share = if *total == 0 { 0.0 } else { *met as f64 / *total as f64 };
             self.report.covers.insert(label.clone(), share);
@@ -1031,6 +1597,18 @@ where
             if let Err(e) = written {
                 self.report
                     .warn("report_json", format!("could not append to {}: {e}", path.display()));
+            }
+        }
+        #[cfg(feature = "json")]
+        if let (Some(mut observations), Some(dir)) =
+            (self.observations.take(), self.config.report.observations.as_ref())
+        {
+            observations.info("crabcheck report", &format!("```\n{}```", self.report));
+            if let Err(e) = observations.write(dir) {
+                self.report.warn(
+                    "observations",
+                    format!("could not write the observation file under {}: {e}", dir.display()),
+                );
             }
         }
         self.report
@@ -1649,6 +2227,134 @@ mod tests {
         let summary = report.target.as_ref().unwrap();
         assert_eq!(summary.iterations, 50);
         assert!(summary.best_score >= 20.0, "{}", summary.best_score);
+    }
+
+    #[test]
+    fn features_timing_and_samples_are_reported() {
+        let mut config = cfg();
+        config.tests = 200;
+        let report = check(&config, gens::vec(gens::int(0i32..=9)), |v: Vec<i32>| {
+            crate::feature("len", v.len());
+            crate::feature("parity", if v.len().is_multiple_of(2) { "even" } else { "odd" });
+            crate::target(v.iter().sum::<i32>() as f64);
+            true
+        });
+        assert_eq!(report.status, Status::Passed, "{report}");
+        let len = &report.features["len"];
+        assert_eq!(len.count, report.tests, "the targeted phase's passes count too");
+        assert!(len.min <= len.median && len.median <= len.p90 && len.p90 <= len.max);
+        assert_eq!(len.histogram.iter().map(|b| b.count).sum::<u64>(), report.tests, "{len:?}");
+        assert!(report.features.contains_key("target"));
+        assert_eq!(
+            report.labels.get("parity=even").copied().unwrap_or(0)
+                + report.labels.get("parity=odd").copied().unwrap_or(0),
+            report.tests
+        );
+        assert!(report.unique_tests <= report.tests && report.unique_tests > 100, "{report}");
+        assert!(!report.distinct_growth.points.is_empty());
+        let timing = report.timing.as_ref().expect("inputs ran");
+        assert!(timing.prop.median <= timing.prop.p90 && timing.prop.p90 <= timing.prop.max);
+        assert!(timing.slowest.is_some());
+        assert!(!report.samples.is_empty() && report.samples.len() <= 5, "{report}");
+        let smallest = &report.samples[0];
+        assert!(report.samples.iter().all(|s| s.size >= smallest.size));
+        let text = report.to_string();
+        assert!(text.contains("feature len:") && text.contains("histogram:"), "{text}");
+        assert!(text.contains("timing: property median") && text.contains("sample ("), "{text}");
+        assert!(text.contains("distinct,"), "{text}");
+    }
+
+    #[cfg(feature = "json")]
+    #[test]
+    fn observation_files_follow_openpbtstats() {
+        let dir = std::env::temp_dir().join(format!("crabcheck-observed-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut config = cfg().name("observed");
+        config.tests = 50;
+        config.report.observations = Some(dir.clone());
+        let report = check(&config, gens::vec(gens::int(0i32..=9)), |v: Vec<i32>| {
+            crate::feature("len", v.len());
+            crate::label("seen");
+            if v.len() == 7 {
+                crate::TestResult::discard("seven")
+            } else {
+                crate::TestResult::check(v.iter().sum::<i32>() < 40, "sum too big")
+            }
+        });
+        assert_eq!(report.status, Status::Failed, "{report}");
+        let text = std::fs::read_to_string(dir.join("observed.jsonl")).expect("file written");
+        let _ = std::fs::remove_dir_all(&dir);
+        let lines: Vec<serde_json::Value> =
+            text.lines().map(|l| serde_json::from_str(l).expect("valid json")).collect();
+        let info = lines.last().unwrap();
+        assert_eq!(info["type"], "info");
+        assert_eq!(info["title"], "crabcheck report");
+        assert!(info["content"].as_str().unwrap().contains("crabcheck: FAILED"));
+        let cases: Vec<&serde_json::Value> =
+            lines.iter().filter(|l| l["type"] == "test_case").collect();
+        assert!(
+            cases
+                .iter()
+                .all(|c| c["run_start"] == info["run_start"] && c["property"] == "observed")
+        );
+        let count = |status: &str, origin: &str| {
+            cases.iter().filter(|c| c["status"] == status && c["how_generated"] == origin).count()
+                as u64
+        };
+        assert_eq!(count("passed", "random"), report.tests);
+        assert_eq!(count("gave_up", "random"), report.discarded);
+        assert_eq!(count("failed", "random"), 1);
+        assert!(count("passed", "shrink") + count("failed", "shrink") > 0, "shrink candidates");
+        let last_case = cases.last().unwrap();
+        assert_eq!(last_case["how_generated"], "minimal");
+        assert_eq!(last_case["status"], "failed");
+        assert_eq!(
+            last_case["representation"],
+            report.failure.as_ref().unwrap().counterexample().debug
+        );
+        let passed = cases.iter().find(|c| c["status"] == "passed").unwrap();
+        assert!(passed["representation"].as_str().unwrap().starts_with('['));
+        assert!(passed["features"]["len"].is_number());
+        assert_eq!(passed["features"]["seen"], "");
+        assert!(passed["timing"]["execute:test"].is_number());
+        assert!(passed["timing"]["generate:input"].is_number());
+        assert_eq!(passed["metadata"]["seed"], report.seed);
+        let failed = cases.iter().find(|c| c["status"] == "failed").unwrap();
+        assert_eq!(failed["status_reason"], "sum too big");
+        let discarded = cases.iter().find(|c| c["status"] == "gave_up").unwrap();
+        assert_eq!(discarded["status_reason"], "seven");
+        #[cfg(feature = "coverage")]
+        if crate::coverage::available() && crate::coverage::locate::Spectrum::new(&[]).is_some() {
+            assert!(passed["coverage"].is_object(), "{passed}");
+        } else {
+            assert!(passed["coverage"].is_null(), "{passed}");
+        }
+        #[cfg(not(feature = "coverage"))]
+        assert!(passed["coverage"].is_null(), "{passed}");
+    }
+
+    #[test]
+    fn samples_keep_the_smallest_the_largest_and_a_reservoir() {
+        let mut samples = Samples::new(5);
+        for (i, size) in [5usize, 3, 9, 1, 7, 8, 2, 6].into_iter().enumerate() {
+            let r = hash_u01(1, i as u64);
+            samples.consider(size, i as u64, crate::report::Origin::Random, r, || {
+                Provenance::Debug(size.to_string())
+            });
+        }
+        let kept = samples.drain();
+        assert_eq!(kept[0].size, 1);
+        assert_eq!(kept[1].size, 9);
+        assert!(kept.len() <= 5 && kept.len() >= 3, "{}", kept.len());
+        let mut none = Samples::new(0);
+        none.consider(
+            1,
+            0,
+            crate::report::Origin::Random,
+            0.5,
+            || Provenance::Debug(String::new()),
+        );
+        assert!(none.drain().is_empty());
     }
 
     #[test]

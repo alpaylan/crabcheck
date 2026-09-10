@@ -4,11 +4,46 @@ expression: text
 ---
 exit: 0
 --- stdout ---
-crabcheck: ok, 1000 tests passed (0 discarded) in [ms], seed 7
+crabcheck: ok, 1000 tests passed (806 distinct, 0 discarded) in [time], seed 7
   labels: no shrink candidates 19%
-crabcheck: ok, 1000 tests passed (0 discarded) in [ms], seed 7
+  timing: property median [time], p90 [time], max [time]; generation median [time], p90 [time], max [time]
+    slowest input: [input]
+  sample (random, iteration 7, size 0): Leaf
+  sample (random, iteration 15, size 100): Leaf
+  sample (random, iteration 74, size 100): Leaf
+  sample (random, iteration 972, size 83): Leaf
+  sample (random, iteration 86, size 0): Node(Node(Leaf, -20, 1, Leaf), -19, 2, Node(Node(Leaf, -18, 9, Node(Node(Leaf, -17, 5, Node(Leaf, -15, 7, Leaf)), -14, 7, Node(Node(Leaf, -13, 6, Leaf), -12, 9, Leaf))), -11, 0, Node(Node(Node(Node(Le…
+crabcheck: ok, 1000 tests passed (974 distinct, 0 discarded) in [time], seed 7
   labels: empty tree 19%, key present 19%
-crabcheck: ok, 1000 tests passed (0 discarded) in [ms], seed 7
-crabcheck: ok, 1000 tests passed (0 discarded) in [ms], seed 7
-crabcheck: ok, 1000 tests passed (0 discarded) in [ms], seed 7
+  timing: property median [time], p90 [time], max [time]; generation median [time], p90 [time], max [time]
+    slowest input: [input]
+  sample (random, iteration 7, size 0): (Leaf, 10, 0)
+  sample (random, iteration 15, size 100): (Leaf, -2, 7)
+  sample (random, iteration 74, size 100): (Leaf, 20, 5)
+  sample (random, iteration 972, size 83): (Leaf, 19, 1)
+  sample (random, iteration 86, size 0): (Node(Node(Leaf, -20, 1, Leaf), -19, 2, Node(Node(Leaf, -18, 9, Node(Node(Leaf, -17, 5, Node(Leaf, -15, 7, Leaf)), -14, 7, Node(Node(Leaf, -13, 6, Leaf), -12, 9, Leaf))), -11, 0, Node(Node(Node(Node(L…
+crabcheck: ok, 1000 tests passed (999 distinct, 0 discarded) in [time], seed 7
+  timing: property median [time], p90 [time], max [time]; generation median [time], p90 [time], max [time]
+    slowest input: [input]
+  sample (random, iteration 7, size 0): (Leaf, 10, -21, 3)
+  sample (random, iteration 15, size 100): (Leaf, -2, 10, 2)
+  sample (random, iteration 74, size 100): (Leaf, 20, 1, 4)
+  sample (random, iteration 972, size 83): (Leaf, 19, -16, 0)
+  sample (random, iteration 86, size 0): (Node(Node(Leaf, -20, 1, Leaf), -19, 2, Node(Node(Leaf, -18, 9, Node(Node(Leaf, -17, 5, Node(Leaf, -15, 7, Leaf)), -14, 7, Node(Node(Leaf, -13, 6, Leaf), -12, 9, Leaf))), -11, 0, Node(Node(Node(Node(L…
+crabcheck: ok, 1000 tests passed (855 distinct, 0 discarded) in [time], seed 7
+  timing: property median [time], p90 [time], max [time]; generation median [time], p90 [time], max [time]
+    slowest input: [input]
+  sample (random, iteration 7, size 0): (Leaf, 10)
+  sample (random, iteration 15, size 100): (Leaf, -2)
+  sample (random, iteration 74, size 100): (Leaf, 20)
+  sample (random, iteration 972, size 83): (Leaf, 19)
+  sample (random, iteration 86, size 0): (Node(Node(Leaf, -20, 1, Leaf), -19, 2, Node(Node(Leaf, -18, 9, Node(Node(Leaf, -17, 5, Node(Leaf, -15, 7, Leaf)), -14, 7, Node(Node(Leaf, -13, 6, Leaf), -12, 9, Leaf))), -11, 0, Node(Node(Node(Node(L…
+crabcheck: ok, 1000 tests passed (995 distinct, 0 discarded) in [time], seed 7
+  timing: property median [time], p90 [time], max [time]; generation median [time], p90 [time], max [time]
+    slowest input: [input]
+  sample (random, iteration 7, size 0): (Leaf, 10, -21)
+  sample (random, iteration 15, size 100): (Leaf, -2, 10)
+  sample (random, iteration 74, size 100): (Leaf, 20, 1)
+  sample (random, iteration 972, size 83): (Leaf, 19, -16)
+  sample (random, iteration 86, size 0): (Node(Node(Leaf, -20, 1, Leaf), -19, 2, Node(Node(Leaf, -18, 9, Node(Node(Leaf, -17, 5, Node(Leaf, -15, 7, Leaf)), -14, 7, Node(Node(Leaf, -13, 6, Leaf), -12, 9, Leaf))), -11, 0, Node(Node(Node(Node(L…
 --- stderr ---

@@ -6,7 +6,9 @@ crabcheck: FAILED, property panicked: sum too large: 101
   at crates/crabcheck/tests/reports/main.rs:[L:C]
   counterexample: [26, 37, 38]
   original:       [29, 28, 37, 17, 27, 37, 38, 34, 0] (size 93, iteration 0)
-  shrinking: 3 of 36 candidates accepted in [ms]
-  after 0 passing tests (0 discarded) in [ms]
+  shrinking: 3 of 36 candidates accepted in [time]
+  after 0 passing tests (0 distinct, 0 discarded) in [time]
   reproduce: CRABCHECK_REPLAY=24301:0
   or rerun the whole search: Config::default().seed(24301)
+  timing: property median [time], p90 [time], max [time]; generation median [time], p90 [time], max [time]
+    slowest input: [input]

@@ -2,5 +2,12 @@
 source: crates/crabcheck/tests/reports/main.rs
 expression: report.to_string()
 ---
-crabcheck: ok, 200 tests passed (0 discarded) in [ms], seed 24301
+crabcheck: ok, 200 tests passed (159 distinct, 0 discarded) in [time], seed 24301
   labels: empty 21%, long 56%, short 44%
+  timing: property median [time], p90 [time], max [time]; generation median [time], p90 [time], max [time]
+    slowest input: [input]
+  sample (random, iteration 18, size 0): []
+  sample (random, iteration 4, size 100): [-46, -50, 39, 37, -43, 46, 2, -18, -6, 4, 20, 45, 0, -23, 23, -47, 50, 26, 49, 5, -2, 2, -10, 21, -26, -10, 40, 45, 37, 34, -23, 9, 13, -44, -49, 43, -21, -21, -34, -12, -19, 13, 40, -32, 12, 29, 35,…
+  sample (random, iteration 7, size 87): [-11, -28, -39, 1, 21, 26, -25, 46, -11, 31, 43, -50, 16, 40, -48, -3, -7, 6, -36, -17, 26, 18, -5, 50, 6, -30, -37, -5, -14, -47, -50, -6, 43, -29, -44]
+  sample (random, iteration 31, size 83): [37, -9, 15, 25, -24, -38, 44, 43, 18, 18, -19, 38, 48, 37, 32, 37, -21, -50, -45, -22, 6, -38, 45, 30, 8, 27, -9, -6, -15, 32, 2, -15, 0, 34, 23, 38, -18, -40, -37, 17, 1, 35, 21, -23, -15, -3, 35, 8…
+  sample (random, iteration 104, size 6): [48, -37, -50, -14, -3, 29]

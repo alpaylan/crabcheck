@@ -205,6 +205,8 @@ pub struct Report {
     pub seed: u64,
     /// Passing tests.
     pub tests: u64,
+    /// Passing tests with distinct inputs (by `Debug` rendering).
+    pub unique_tests: u64,
     /// Discarded inputs (from generators and from the property).
     pub discarded: u64,
     /// Generation attempts made (passing, discarded and failing).
@@ -224,6 +226,18 @@ pub struct Report {
     pub prop_time: Duration,
     /// Share of generated (non-discarded) inputs that were distinct.
     pub distinct_inputs_ratio: f64,
+    /// Distinct inputs seen (y) after each number of generated inputs (x),
+    /// recorded whenever a new input appeared; a curve that flattens early
+    /// means the generator repeats itself. From the main thread only.
+    pub distinct_growth: Series,
+    /// Numeric features recorded with [`feature`](crate::feature), summarised
+    /// over the passing tests.
+    pub features: BTreeMap<String, FeatureSummary>,
+    /// Per-input timing, when any input ran.
+    pub timing: Option<Timing>,
+    /// A few of the passing inputs (the smallest and the largest by size,
+    /// and a random sample), so the report shows what the generator makes.
+    pub samples: Vec<Sample>,
     /// The failure, when `status` is `Failed`.
     pub failure: Option<Failure>,
     /// The generator panic, when `status` is `Aborted`.
@@ -266,6 +280,7 @@ impl Report {
             status: Status::Passed,
             seed,
             tests: 0,
+            unique_tests: 0,
             discarded: 0,
             iterations: 0,
             stopped_by_budget: false,
@@ -275,6 +290,10 @@ impl Report {
             gen_time: Duration::ZERO,
             prop_time: Duration::ZERO,
             distinct_inputs_ratio: 1.0,
+            distinct_growth: Series::default(),
+            features: BTreeMap::new(),
+            timing: None,
+            samples: Vec::new(),
             failure: None,
             abort: None,
             replay: None,
@@ -327,14 +346,220 @@ fn millis(d: Duration) -> String {
     format!("{:.1} ms", d.as_secs_f64() * 1000.0)
 }
 
+/// A duration in the unit that reads best.
+fn human(d: Duration) -> String {
+    let micros = d.as_secs_f64() * 1e6;
+    if micros < 1000.0 {
+        format!("{micros:.0} µs")
+    } else if micros < 1e6 {
+        format!("{:.1} ms", micros / 1000.0)
+    } else {
+        format!("{:.2} s", micros / 1e6)
+    }
+}
+
+/// A feature value without a trailing `.0` for integers.
+fn number(x: f64) -> String {
+    if x.fract() == 0.0 && x.abs() < 1e15 { format!("{x:.0}") } else { format!("{x:.3}") }
+}
+
+/// A time series sampled whenever the value grew, thinned to at most 512
+/// points (every other point is dropped when it fills up, so the resolution
+/// stays even across the run).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "json", derive(serde::Serialize, serde::Deserialize))]
+pub struct Series {
+    /// `(x, y)` points in increasing `x`.
+    pub points: Vec<(u64, u64)>,
+}
+
+impl Series {
+    /// Append a point, thinning the series when it fills up.
+    pub(crate) fn push(&mut self, x: u64, y: u64) {
+        self.points.push((x, y));
+        if self.points.len() > 512 {
+            let last = self.points.pop();
+            let mut keep = false;
+            self.points.retain(|_| {
+                keep = !keep;
+                keep
+            });
+            self.points.extend(last);
+        }
+    }
+}
+
+/// One bar of a feature histogram: values in `from..=to`.
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "json", derive(serde::Serialize, serde::Deserialize))]
+pub struct Bucket {
+    /// Lower bound, inclusive.
+    pub from: f64,
+    /// Upper bound, inclusive.
+    pub to: f64,
+    /// Values in the bucket.
+    pub count: u64,
+}
+
+/// A numeric feature over the passing tests (see [`feature`](crate::feature)).
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "json", derive(serde::Serialize, serde::Deserialize))]
+pub struct FeatureSummary {
+    /// Values recorded.
+    pub count: u64,
+    /// Smallest value.
+    pub min: f64,
+    /// Largest value.
+    pub max: f64,
+    /// Arithmetic mean.
+    pub mean: f64,
+    /// Median.
+    pub median: f64,
+    /// 90th percentile.
+    pub p90: f64,
+    /// Up to eight buckets between `min` and `max`; one per value when the
+    /// values are a few integers.
+    pub histogram: Vec<Bucket>,
+}
+
+impl FeatureSummary {
+    /// Summarise finite values.
+    pub(crate) fn of(mut values: Vec<f64>) -> FeatureSummary {
+        values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let count = values.len() as u64;
+        let min = values[0];
+        let max = values[values.len() - 1];
+        let mean = values.iter().sum::<f64>() / values.len() as f64;
+        let median = values[values.len() / 2];
+        let p90 = values[(values.len() * 9 / 10).min(values.len() - 1)];
+        let integral = values.iter().all(|v| v.fract() == 0.0);
+        let mut histogram = Vec::new();
+        if integral && max - min < 8.0 {
+            let mut at = min;
+            while at <= max {
+                let n = values.iter().filter(|&&v| v == at).count() as u64;
+                histogram.push(Bucket { from: at, to: at, count: n });
+                at += 1.0;
+            }
+        } else if max > min {
+            let width = if integral { ((max - min + 1.0) / 8.0).ceil() } else { (max - min) / 8.0 };
+            for i in 0..8 {
+                let from = min + width * i as f64;
+                let to = if integral { from + width - 1.0 } else { from + width };
+                let last = i == 7;
+                let n = values
+                    .iter()
+                    .filter(|&&v| v >= from && (v < from + width || (last && v <= max)))
+                    .count() as u64;
+                histogram.push(Bucket { from, to: to.min(max), count: n });
+            }
+        } else {
+            histogram.push(Bucket { from: min, to: max, count });
+        }
+        FeatureSummary { count, min, max, mean, median, p90, histogram }
+    }
+}
+
+/// Quantiles of a set of durations.
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "json", derive(serde::Serialize, serde::Deserialize))]
+pub struct DurationStats {
+    /// Median.
+    pub median: Duration,
+    /// 90th percentile.
+    pub p90: Duration,
+    /// Longest.
+    pub max: Duration,
+}
+
+impl DurationStats {
+    /// From per-input microseconds; `None` when empty.
+    pub(crate) fn of(mut micros: Vec<u32>) -> Option<DurationStats> {
+        if micros.is_empty() {
+            return None;
+        }
+        micros.sort_unstable();
+        let at = |q: usize| Duration::from_micros(u64::from(micros[q.min(micros.len() - 1)]));
+        Some(DurationStats {
+            median: at(micros.len() / 2),
+            p90: at(micros.len() * 9 / 10),
+            max: at(micros.len() - 1),
+        })
+    }
+}
+
+/// Per-input timing over the run.
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "json", derive(serde::Serialize, serde::Deserialize))]
+pub struct Timing {
+    /// Time the property took per input.
+    pub prop: DurationStats,
+    /// Time generation took per input (mutation, in the targeted phase).
+    pub generation: DurationStats,
+    /// `Debug` rendering of the input the property took longest on, when
+    /// known.
+    pub slowest: Option<String>,
+}
+
+/// Where an input came from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "json", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "json", serde(rename_all = "lowercase"))]
+pub enum Origin {
+    /// The random phase.
+    Random,
+    /// A fresh input drawn during the targeted phase.
+    Explore,
+    /// A mutant of a pool input in the targeted phase.
+    Mutation,
+    /// The explicit replay point.
+    Replay,
+    /// A remembered failure from the regressions file.
+    Regression,
+}
+
+impl Origin {
+    /// The lowercase name used in reports and observation files.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Origin::Random => "random",
+            Origin::Explore => "explore",
+            Origin::Mutation => "mutation",
+            Origin::Replay => "replay",
+            Origin::Regression => "regression",
+        }
+    }
+}
+
+impl fmt::Display for Origin {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// One of the passing inputs shown in the report.
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "json", derive(serde::Serialize, serde::Deserialize))]
+pub struct Sample {
+    /// `Debug` rendering, cut at 200 characters with a trailing `…`.
+    pub debug: String,
+    /// How the input was produced.
+    pub origin: Origin,
+    /// The size it was generated at.
+    pub size: usize,
+    /// Its iteration number.
+    pub iteration: u64,
+}
+
 impl fmt::Display for Report {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.status {
             Status::Passed => {
                 writeln!(
                     f,
-                    "crabcheck: ok, {} tests passed ({} discarded) in {}, seed {}{}",
+                    "crabcheck: ok, {} tests passed ({} distinct, {} discarded) in {}, seed {}{}",
                     self.tests,
+                    self.unique_tests,
                     self.discarded,
                     millis(self.duration),
                     self.seed,
@@ -398,8 +623,9 @@ impl fmt::Display for Report {
                 }
                 writeln!(
                     f,
-                    "  after {} passing tests ({} discarded) in {}",
+                    "  after {} passing tests ({} distinct, {} discarded) in {}",
                     self.tests,
+                    self.unique_tests,
                     self.discarded,
                     millis(self.duration)
                 )?;
@@ -567,6 +793,55 @@ impl fmt::Display for Report {
                 })
                 .collect();
             writeln!(f, "  labels: {}", labels.join(", "))?;
+        }
+        for (name, feature) in &self.features {
+            writeln!(
+                f,
+                "  feature {name}: {} values, min {}, median {}, p90 {}, max {}",
+                feature.count,
+                number(feature.min),
+                number(feature.median),
+                number(feature.p90),
+                number(feature.max)
+            )?;
+            if feature.histogram.len() > 1 {
+                let buckets: Vec<String> = feature
+                    .histogram
+                    .iter()
+                    .filter(|b| b.count > 0)
+                    .map(|b| {
+                        let range = if b.from == b.to {
+                            number(b.from)
+                        } else {
+                            format!("{}-{}", number(b.from), number(b.to))
+                        };
+                        format!("{range} {:.0}%", b.count as f64 * 100.0 / feature.count as f64)
+                    })
+                    .collect();
+                writeln!(f, "    histogram: {}", buckets.join(", "))?;
+            }
+        }
+        if let Some(timing) = &self.timing {
+            writeln!(
+                f,
+                "  timing: property median {}, p90 {}, max {}; generation median {}, p90 {}, max {}",
+                human(timing.prop.median),
+                human(timing.prop.p90),
+                human(timing.prop.max),
+                human(timing.generation.median),
+                human(timing.generation.p90),
+                human(timing.generation.max)
+            )?;
+            if let Some(slowest) = &timing.slowest {
+                writeln!(f, "    slowest input: {slowest}")?;
+            }
+        }
+        for sample in &self.samples {
+            writeln!(
+                f,
+                "  sample ({}, iteration {}, size {}): {}",
+                sample.origin, sample.iteration, sample.size, sample.debug
+            )?;
         }
         for warning in &self.health {
             writeln!(f, "  warning [{}]: {}", warning.kind, warning.message)?;

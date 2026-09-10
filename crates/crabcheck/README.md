@@ -150,6 +150,11 @@ The full list is in the `config` module documentation.
   `-Z coverage-options=branch` adds per-outcome branch counters that the
   same report and localization use.
 
+Set `CRABCHECK_OBSERVATIONS=.crabcheck/observed` to write one observation
+file per property in the OpenPBTStats format, and open it in
+[Tyche](https://github.com/tyche-pbt/tyche-extension) to see the sample
+breakdown, feature distributions, coverage and timing charts.
+
 Minimum supported Rust version: 1.88.
 
 ## Status

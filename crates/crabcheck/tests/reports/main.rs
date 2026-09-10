@@ -52,8 +52,9 @@ fn base(name: &str) -> Config {
 /// `slow_generation` warning compares timings, so it is dropped entirely.
 fn settings(paths: &[&Path]) -> insta::Settings {
     let mut settings = insta::Settings::clone_current();
-    settings.add_filter(r"\d+\.\d+ ms", "[ms]");
-    settings.add_filter(r"\b\d+ ms\b", "[ms]");
+    settings.add_filter(r"\b\d+(\.\d+)? (µs|ms|s)\b", "[time]");
+    settings.add_filter(r"    slowest input: .*", "    slowest input: [input]");
+    settings.add_filter(r#""slowest": "(?:[^"\\]|\\.)*""#, r#""slowest": "[input]""#);
     settings.add_filter(r"\n  warning \[slow_generation\][^\n]*", "");
     settings.add_filter(r"reports/(main|planted)\.rs:\d+:\d+", "reports/$1.rs:[L:C]");
     settings.add_filter(r#""line": \d+,(\s*)"column": \d+"#, r#""line": "[L]",$1"column": "[C]""#);
@@ -243,7 +244,8 @@ fn cover_shares_are_reported() {
 
 /// The examples double as an ecosystem check: run each with a fixed seed and
 /// snapshot what it prints. They are built by `cargo test` (not by
-/// `cargo test --test reports`, which skips this with a note).
+/// `cargo test --test reports`, which skips this with a note, and which can
+/// also see stale example binaries after a library change).
 #[test]
 fn examples_print_the_same_reports() {
     no_env_overrides();

@@ -2,5 +2,12 @@
 source: crates/crabcheck/tests/reports/main.rs
 expression: report.to_string()
 ---
-crabcheck: ok, 200 tests passed (0 discarded) in [ms], seed 24301
+crabcheck: ok, 200 tests passed (127 distinct, 0 discarded) in [time], seed 24301
   coverage: 1 of 1 functions in `reports::planted` reached, 4 of 4 counters
+  timing: property median [time], p90 [time], max [time]; generation median [time], p90 [time], max [time]
+    slowest input: [input]
+  sample (random, iteration 18, size 0): -86
+  sample (random, iteration 4, size 100): 83
+  sample (random, iteration 7, size 87): -19
+  sample (random, iteration 31, size 83): 61
+  sample (random, iteration 104, size 6): 94

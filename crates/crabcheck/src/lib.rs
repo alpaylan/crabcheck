@@ -20,8 +20,12 @@
 //! - [`Config`] holds every knob; `CRABCHECK_*` variables override it (see
 //!   [`config`]).
 //! - Inside a property, [`label`] and [`classify`] record how inputs are
-//!   distributed, [`cover`] requires a share of inputs to meet a condition
-//!   and [`target`] steers the search toward high scores.
+//!   distributed, [`feature`] records a number or a category per input
+//!   (summarised with quantiles and a histogram), [`cover`] requires a share
+//!   of inputs to meet a condition and [`target`] steers the search toward
+//!   high scores. The report also shows a few sampled inputs and per-input
+//!   timing, and `CRABCHECK_OBSERVATIONS=dir` writes every input as an
+//!   OpenPBTStats observation for Tyche (see [`config`]).
 //! - With the `coverage` feature and `RUSTFLAGS="-C instrument-coverage"`,
 //!   the report says which functions of the crate under test each property
 //!   reached, inputs that reach new code seed the targeted search, and a
@@ -139,8 +143,10 @@ pub use {
         check,
         check_par,
         labels::{
+            FeatureValue,
             classify,
             cover,
+            feature,
             label,
             target,
         },
@@ -200,6 +206,7 @@ pub mod prelude {
         check_shrinker,
         classify,
         cover,
+        feature,
         gens,
         label,
         quickcheck,

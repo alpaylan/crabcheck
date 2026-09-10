@@ -61,7 +61,10 @@ pub(crate) mod mapping;
 mod names;
 pub(crate) mod tracker;
 
-pub(crate) use locate::display_path;
+pub(crate) use locate::{
+    display_path,
+    lines_hit,
+};
 
 pub use {
     counters::{

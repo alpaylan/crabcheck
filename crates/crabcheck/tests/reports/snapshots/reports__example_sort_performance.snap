@@ -4,7 +4,16 @@ expression: text
 ---
 exit: 0
 --- stdout ---
-crabcheck: ok, 10255 tests passed (0 discarded) in [ms], seed 7
+crabcheck: ok, 10255 tests passed (10247 distinct, 0 discarded) in [time], seed 7
   target: best score 1 reached by [98, 91, 82, 69, 63, 60, 56, 48, 30, 28, 16, 9] (256 mutated inputs, 12 improvements)
+  feature target: 10255 values, min 0.121, median 0.500, p90 0.652, max 1
+    histogram: 0.121-0.231 1%, 0.231-0.341 7%, 0.341-0.451 24%, 0.451-0.561 36%, 0.561-0.670 25%, 0.670-0.780 5%, 0.780-0.890 1%, 0.890-1 2%
+  timing: property median [time], p90 [time], max [time]; generation median [time], p90 [time], max [time]
+    slowest input: [input]
+  sample (random, iteration 0, size 0): [76, 20, 87, 63, 51, 34, 5, 76, 85, 57, 25, 2]
+  sample (random, iteration 15, size 12): [46, 70, 28, 15, 8, 47, 6, 0, 58, 69, 43, 92]
+  sample (random, iteration 2917, size 12): [24, 11, 55, 37, 95, 82, 3, 7, 96, 17, 65, 31]
+  sample (random, iteration 4090, size 6): [6, 2, 2, 83, 75, 28, 69, 75, 73, 23, 98, 99]
+  sample (random, iteration 4343, size 0): [60, 22, 3, 72, 0, 48, 49, 0, 52, 76, 35, 67]
 worst case found: 66 swaps out of a possible 66 (100%)
 --- stderr ---

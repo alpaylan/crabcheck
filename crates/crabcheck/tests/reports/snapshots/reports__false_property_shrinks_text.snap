@@ -5,7 +5,9 @@ expression: report.to_string()
 crabcheck: FAILED, property returned false
   counterexample: [0, 0, 0]
   original:       [7, 6, 9, 4, 6, 9, 9, 8, 0] (size 93, iteration 0)
-  shrinking: 4 of 13 candidates accepted in [ms]
-  after 0 passing tests (0 discarded) in [ms]
+  shrinking: 4 of 13 candidates accepted in [time]
+  after 0 passing tests (0 distinct, 0 discarded) in [time]
   reproduce: CRABCHECK_REPLAY=24301:0
   or rerun the whole search: Config::default().seed(24301)
+  timing: property median [time], p90 [time], max [time]; generation median [time], p90 [time], max [time]
+    slowest input: [input]

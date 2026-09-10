@@ -7,6 +7,8 @@ use std::{
     path::Path,
 };
 
+use crate::report::Series;
+
 use super::counters::{
     Delta,
     Functions,
@@ -48,6 +50,12 @@ pub(crate) struct Tracker {
     pub last_novelty_at: u64,
     /// Name prefix used to select functions, for the report.
     filter: String,
+    /// Whether each window slot belongs to a selected function.
+    selected_mask: Vec<bool>,
+    /// Selected counters hit so far.
+    hit_so_far: usize,
+    /// (inputs observed, counters hit) whenever coverage grew.
+    growth: Series,
 }
 
 /// What one input did.
@@ -83,6 +91,12 @@ impl Tracker {
         let lo = selected.iter().map(|&i| functions.all()[i].counters.start).min()?;
         let hi = selected.iter().map(|&i| functions.all()[i].counters.end).max()?;
         let width = hi - lo;
+        let mut selected_mask = vec![false; width];
+        for &i in &selected {
+            for c in functions.all()[i].counters.clone() {
+                selected_mask[c - lo] = true;
+            }
+        }
         Some(Tracker {
             window: lo..hi,
             selected,
@@ -92,6 +106,9 @@ impl Tracker {
             novel_inputs: 0,
             last_novelty_at: 0,
             filter: filter.to_string(),
+            selected_mask,
+            hit_so_far: 0,
+            growth: Series::default(),
         })
     }
 
@@ -110,8 +127,13 @@ impl Tracker {
         let after = snapshot_range(&self.window).unwrap_or_else(|| before.clone());
         let delta = before.delta(&after);
         let mut novel = false;
+        let mut grew = false;
         for &(index, count) in delta.hits() {
             let slot = index - self.window.start;
+            if self.touched_by[slot] == 0 && self.selected_mask[slot] {
+                self.hit_so_far += 1;
+                grew = true;
+            }
             self.touched_by[slot] += 1;
             let class = bucket(count);
             if class > self.virgin[slot] {
@@ -124,6 +146,9 @@ impl Tracker {
             self.last_novelty_at = self.inputs;
         }
         self.inputs += 1;
+        if grew {
+            self.growth.push(self.inputs, self.hit_so_far as u64);
+        }
         Observation { delta, novel }
     }
 
@@ -170,6 +195,7 @@ impl Tracker {
             last_novelty_at: self.last_novelty_at,
             unreached: unreached.into_iter().collect(),
             partial,
+            growth: self.growth.clone(),
         }
     }
 }
@@ -199,6 +225,10 @@ pub struct Summary {
     /// Reached functions with counters no input hit, as (name, hit, total),
     /// most missed first: the branches the generator does not exercise.
     pub partial: Vec<(String, usize, usize)>,
+    /// Counters hit (y) after each number of inputs (x), recorded whenever
+    /// coverage grew: a curve that flattens early means the generator has
+    /// stopped reaching new code.
+    pub growth: Series,
 }
 
 fn is_own(name: &str) -> bool {

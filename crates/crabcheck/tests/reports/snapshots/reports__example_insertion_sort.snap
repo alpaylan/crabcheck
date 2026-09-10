@@ -4,13 +4,23 @@ expression: text
 ---
 exit: 0
 --- stdout ---
-crabcheck: ok, 10000 tests passed (0 discarded) in [ms], seed 7
+crabcheck: ok, 10000 tests passed (8251 distinct, 0 discarded) in [time], seed 7
   labels: empty 16%, long 48%
+  timing: property median [time], p90 [time], max [time]; generation median [time], p90 [time], max [time]
+    slowest input: [input]
+  sample (random, iteration 7, size 0): []
+  sample (random, iteration 15, size 100): [-89, 405, -439, -693, -826, -68, -863, -989, 164, 371, -145, 840, -646, -32, -328, 742, 232, -15, 647, -29, -30, -90, -731, -176, 38, -881, -156, 28, -573, -61, -584, -615, 618, 10, -625, -332, -913,…
+  sample (random, iteration 2917, size 100): [-507, -775, 92, -256, 894, 640, -925, -860, 921, -659, 302, -369, 256, 357, 932, 676, 807]
+  sample (random, iteration 4090, size 52): [-870, -959, -944]
+  sample (random, iteration 4343, size 2): [197, -548]
 crabcheck: FAILED, property returned false
   counterexample: [1, 0]
   original:       [867, -21, -189, -910, 805, -122, 433] (size 7, iteration 1)
-  shrinking: 18 of 70 candidates accepted in [ms]
-  after 1 passing tests (0 discarded) in [ms]
+  shrinking: 18 of 70 candidates accepted in [time]
+  after 1 passing tests (1 distinct, 0 discarded) in [time]
   reproduce: CRABCHECK_REPLAY=7:1
   or rerun the whole search: Config::default().seed(7)
+  timing: property median [time], p90 [time], max [time]; generation median [time], p90 [time], max [time]
+    slowest input: [input]
+  sample (random, iteration 0, size 5): []
 --- stderr ---

@@ -7,7 +7,11 @@
 //! with a prior for the function containing the panic site.
 
 use std::{
-    collections::HashMap,
+    collections::{
+        BTreeMap,
+        BTreeSet,
+        HashMap,
+    },
     ops::Range,
 };
 
@@ -415,6 +419,55 @@ fn rank_by<T>(items: &[T], key: impl Fn(&T) -> f64) -> Vec<usize> {
 fn same_file(mapped: &str, panic: &str) -> bool {
     let (m, p) = (mapped.replace('\\', "/"), panic.replace('\\', "/"));
     m == p || m.ends_with(&format!("/{p}")) || p.ends_with(&format!("/{m}"))
+}
+
+/// The source lines an input executed, per file, from its counter delta and
+/// the mapping of the selected functions; `None` without a mapping. Code
+/// regions with a non-zero count contribute every line they span.
+pub(crate) fn lines_hit(delta: &Delta, selected: &[usize]) -> Option<BTreeMap<String, Vec<u32>>> {
+    let mapping = Mapping::get()?;
+    let all = Functions::get().all();
+    let hits = delta.hits();
+    let mut lines: BTreeMap<usize, BTreeSet<u32>> = BTreeMap::new();
+    let mut values = Vec::new();
+    for &index in selected {
+        let function = &all[index];
+        let range = &function.counters;
+        let first = hits.partition_point(|(i, _)| *i < range.start);
+        if first >= hits.len() || hits[first].0 >= range.end {
+            continue;
+        }
+        let Some(mapped) = mapping.function(function.name_ref, function.func_hash) else {
+            continue;
+        };
+        values.clear();
+        values.resize(range.len(), 0);
+        for &(i, count) in &hits[first..] {
+            if i >= range.end {
+                break;
+            }
+            values[i - range.start] = count;
+        }
+        for region in &mapped.regions {
+            let count = match region.kind {
+                Kind::Code => mapped.eval(region.counter, &values),
+                Kind::Branch => {
+                    mapped.eval(region.counter, &values)
+                        + mapped.eval(region.false_counter, &values)
+                },
+                _ => 0,
+            };
+            if count > 0 {
+                lines.entry(region.file).or_default().extend(region.start_line..=region.end_line);
+            }
+        }
+    }
+    Some(
+        lines
+            .into_iter()
+            .map(|(file, set)| (mapping.files[file].clone(), set.into_iter().collect()))
+            .collect(),
+    )
 }
 
 /// Shorten a file name for display: relative to the current directory when

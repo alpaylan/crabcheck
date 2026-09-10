@@ -5,7 +5,14 @@ expression: report.to_string()
 crabcheck: FAILED, property failed: "406 is divisible by seven"
   counterexample: 406
   found at size 87, iteration 7
-  shrinking: 0 of 9 candidates accepted in [ms]
-  after 7 passing tests (0 discarded) in [ms]
+  shrinking: 0 of 9 candidates accepted in [time]
+  after 7 passing tests (7 distinct, 0 discarded) in [time]
   reproduce: CRABCHECK_REPLAY=24301:7
   or rerun the whole search: Config::default().seed(24301)
+  timing: property median [time], p90 [time], max [time]; generation median [time], p90 [time], max [time]
+    slowest input: [input]
+  sample (random, iteration 6, size 12): 277
+  sample (random, iteration 4, size 100): 911
+  sample (random, iteration 0, size 93): 104
+  sample (random, iteration 5, size 22): 503
+  sample (random, iteration 3, size 26): 800
