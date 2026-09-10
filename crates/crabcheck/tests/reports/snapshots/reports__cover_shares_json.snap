@@ -697,6 +697,7 @@ expression: "serde_json::to_string_pretty(&report).expect(\"report serializes\")
   },
   "target": null,
   "profraw": null,
+  "coverage_html": null,
   "covers": {
     "always": 1.0,
     "long": 0.0

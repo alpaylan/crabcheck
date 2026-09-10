@@ -144,7 +144,9 @@ The full list is in the `config` module documentation.
   (suspect functions ranked from the coverage of passing and failing runs)
   and coverage targets: name a file and line range in
   `.crabcheck/targets.jsonl` and the search steers toward it and the
-  report says whether it got there.
+  report says whether it got there. `CRABCHECK_COVERAGE_HTML=dir` writes a
+  coverage grid page (modules, functions, lines, targets, samples) where a
+  line range becomes a new target and a brief for the agent.
   Uninstrumented builds compile the same API to no-ops. Run coverage-using
   suites with `RUST_TEST_THREADS=1` for exact attribution, and point
   `LLVM_PROFILE_FILE` into the target directory (see the `coverage` module

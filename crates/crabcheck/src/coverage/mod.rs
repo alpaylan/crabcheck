@@ -56,6 +56,18 @@
 //! entered at all, so an agent knows whether to widen the generator or to
 //! change the shape of its inputs.
 //!
+//! # The coverage grid
+//!
+//! `Config::coverage.html` (`CRABCHECK_COVERAGE_HTML=dir`) writes
+//! `<dir>/<property>.html`: a page with no external resources showing the
+//! tracked functions by module, how many inputs entered each, their source
+//! with the number of inputs that executed every line, the targets and the
+//! sampled inputs. Clicking a line number selects it (shift-click extends
+//! the selection); the panel on the right then shows the `targets.jsonl`
+//! line for the selection and a brief describing the target, its current
+//! coverage and what the generator produces, to hand to whoever rewrites
+//! the generator. Needs the `json` feature.
+//!
 //! # Regions and branches
 //!
 //! Stable Rust instruments *code regions*: every `if` and `match` arm,
@@ -75,6 +87,8 @@
 //! in a condition that is evaluated on every run but decided differently.
 
 mod counters;
+#[cfg(feature = "json")]
+pub(crate) mod grid;
 pub(crate) mod locate;
 pub(crate) mod mapping;
 #[cfg_attr(not(crabcheck_instrumented), allow(dead_code))]

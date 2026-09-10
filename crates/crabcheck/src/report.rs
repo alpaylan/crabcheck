@@ -264,6 +264,8 @@ pub struct Report {
     pub locate: Option<crate::coverage::Locate>,
     /// Path of the profraw written for `llvm-cov`, when requested.
     pub profraw: Option<PathBuf>,
+    /// Path of the coverage grid page, when `Config::coverage.html` is set.
+    pub coverage_html: Option<PathBuf>,
     /// Labels registered with [`cover`](crate::cover) and the share of passing
     /// tests that carried each.
     pub covers: BTreeMap<String, f64>,
@@ -307,6 +309,7 @@ impl Report {
             #[cfg(feature = "coverage")]
             locate: None,
             profraw: None,
+            coverage_html: None,
             covers: BTreeMap::new(),
             labels: BTreeMap::new(),
             sizes: BTreeMap::new(),
@@ -772,6 +775,9 @@ impl fmt::Display for Report {
         }
         if let Some(profraw) = &self.profraw {
             writeln!(f, "  profraw written to {}", profraw.display())?;
+        }
+        if let Some(page) = &self.coverage_html {
+            writeln!(f, "  coverage grid written to {}", page.display())?;
         }
         #[cfg(feature = "coverage")]
         if let Some(locate) = &self.locate {

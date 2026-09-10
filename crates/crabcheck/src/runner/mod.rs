@@ -311,13 +311,22 @@ struct CoverageState {
     tracker: Option<crate::coverage::tracker::Tracker>,
     spectrum: Option<crate::coverage::locate::Spectrum>,
     targets: Option<crate::coverage::targets::Targets>,
+    #[cfg(feature = "json")]
+    grid: Option<crate::coverage::grid::Grid>,
     signature: Option<Signature>,
 }
 
 #[cfg(feature = "coverage")]
 impl CoverageState {
     fn new() -> Self {
-        CoverageState { tracker: None, spectrum: None, targets: None, signature: None }
+        CoverageState {
+            tracker: None,
+            spectrum: None,
+            targets: None,
+            #[cfg(feature = "json")]
+            grid: None,
+            signature: None,
+        }
     }
 
     fn begin(&self) -> Option<crate::coverage::Snapshot> {
@@ -342,6 +351,10 @@ impl CoverageState {
             Some(targets) => targets.observe(&observation.delta, tracker.inputs()),
             None => false,
         };
+        #[cfg(feature = "json")]
+        if let Some(grid) = self.grid.as_mut() {
+            grid.observe(&observation.delta);
+        }
         let lines = if want_lines {
             crate::coverage::lines_hit(&observation.delta, tracker.selected())
         } else {
@@ -992,6 +1005,20 @@ where
             Some(tracker) => {
                 let guard = crate::coverage::lock();
                 self.coverage.targets = targets;
+                if self.config.coverage.html.is_some() {
+                    #[cfg(feature = "json")]
+                    {
+                        self.coverage.grid = crate::coverage::grid::Grid::new(tracker.selected());
+                        if self.coverage.grid.is_none() {
+                            self.report.warn(
+                                "coverage_html",
+                                "the binary carries no coverage mapping, so the coverage grid cannot be written",
+                            );
+                        }
+                    }
+                    #[cfg(not(feature = "json"))]
+                    self.report.warn("coverage_html", "the coverage grid needs the `json` feature");
+                }
                 if self.config.locate.enabled {
                     self.coverage.spectrum =
                         crate::coverage::locate::Spectrum::new(tracker.selected());
@@ -1654,6 +1681,37 @@ where
                                 if missed == 1 { "counter was" } else { "counters were" }
                             ),
                         );
+                    }
+                }
+                #[cfg(feature = "json")]
+                if let (Some(grid), Some(dir)) =
+                    (self.coverage.grid.take(), self.config.coverage.html.as_ref())
+                {
+                    let samples: Vec<(String, String, usize)> = self
+                        .report
+                        .samples
+                        .iter()
+                        .map(|s| (s.debug.clone(), s.origin.to_string(), s.size))
+                        .collect();
+                    let html = grid.render(
+                        &self.name,
+                        self.seed,
+                        self.report.tests,
+                        &summary.filter,
+                        &summary.targets,
+                        &samples,
+                    );
+                    match grid.write(dir, &self.name, &html) {
+                        Ok(path) => self.report.coverage_html = Some(path),
+                        Err(e) => {
+                            self.report.warn(
+                                "coverage_html",
+                                format!(
+                                    "could not write the coverage grid under {}: {e}",
+                                    dir.display()
+                                ),
+                            )
+                        },
                     }
                 }
                 self.report.coverage = Some(summary);
@@ -2511,6 +2569,53 @@ mod tests {
         assert!(text.contains("never reached") && text.contains("took other branches"), "{text}");
         assert!(text.contains("hit by"), "{text}");
         assert!(report.target.is_some(), "targets turn the guided search on: {report}");
+    }
+
+    #[cfg(all(crabcheck_instrumented, feature = "coverage", feature = "json"))]
+    #[test]
+    fn the_coverage_grid_is_written() {
+        use crate::config::CoverageTarget;
+        let dir = std::env::temp_dir().join(format!("crabcheck-grid-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut config = cfg().name("grid::branchy");
+        config.tests = 50;
+        config.coverage.html = Some(dir.clone());
+        config.coverage.targets =
+            vec![CoverageTarget::new(file!(), BRANCHY_LINE + 2..=BRANCHY_LINE + 2)];
+        config.coverage.targets_file = None;
+        let report = check(&config, gens::int(-100i32..=100), |x| branchy(x) == 2);
+        let page = report.coverage_html.clone().expect("grid written");
+        assert_eq!(page, dir.join("grid_branchy.html"));
+        assert!(report.to_string().contains("coverage grid written to"), "{report}");
+        let html = std::fs::read_to_string(&page).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(html.contains("crabcheck::runner::tests::branchy"), "function listed");
+        assert!(html.contains("\"file_index\""), "targets embedded");
+        assert!(html.contains("fn branchy(x: i32) -> i32 {"), "source embedded");
+        // The page embeds this very file as source, so look at the script
+        // tag rather than for the placeholder's absence.
+        assert!(html.contains("<script id=\"data\" type=\"application/json\">{"), "data embedded");
+        let start = html.find("<script id=\"data\"").unwrap();
+        let end = html[start..].find("</script>").unwrap() + start;
+        let json_text = &html[html[start..].find('>').unwrap() + start + 1..end];
+        let data: serde_json::Value =
+            serde_json::from_str(json_text).expect("embedded JSON parses");
+        assert_eq!(data["property"], "grid::branchy");
+        assert!(
+            data["files"].as_array().unwrap().iter().any(|f| {
+                f["functions"].as_array().unwrap().iter().any(|func| {
+                    func["name"] == "crabcheck::runner::tests::branchy"
+                        && func["lines"].as_array().unwrap().iter().any(|l| l[1] == 0)
+                        && func["lines"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .any(|l| l[1].as_u64().unwrap() > 0)
+                })
+            }),
+            "{data}"
+        );
+        assert_eq!(data["targets"][0]["hits"], 0);
     }
 
     #[cfg(feature = "coverage")]

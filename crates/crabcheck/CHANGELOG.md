@@ -92,6 +92,13 @@ library verifies them and makes every failure reproducible from its seed.
   guided search (which then runs without `coverage.guided`), and the
   report says per target how many inputs hit it or, when none did, whether
   its function was entered at all (`coverage_target_missed`).
+- The coverage grid (`Config::coverage.html`, `CRABCHECK_COVERAGE_HTML=dir`,
+  needs the `json` feature): one self-contained page per property with
+  every tracked function grouped by module, how many inputs entered each,
+  its source with per-line input and execution counts (innermost-region
+  semantics), the targets and their outcomes, and the sampled inputs.
+  Selecting lines produces the `targets.jsonl` entry and a brief for the
+  agent that will change the generator.
 - Fault localization in core (`Config::locate`, on by default when
   coverage is collected): the coverage mapping (`__llvm_covmap` and
   `__llvm_covfun`, versions 4 to 7) is read from the running executable,

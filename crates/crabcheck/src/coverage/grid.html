@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>crabcheck coverage</title>
+<style>
+:root { --bg:#f4f5f8; --panel:#ffffff; --ink:#1b2330; --muted:#69737f; --line:#dfe3ea; --accent:#2f6fed; --accent-rgb:47,111,237; --hot:#d97706; --cold-rgb:198,40,40; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+@media (prefers-color-scheme: dark) { :root { --bg:#11151b; --panel:#181d25; --ink:#e4e8ee; --muted:#96a1b0; --line:#2a3240; --accent:#7ea3ff; --accent-rgb:126,163,255; --hot:#f0a24d; --cold-rgb:239,107,107; } }
+* { box-sizing: border-box; }
+body { margin:0; font-family: var(--sans); background: var(--bg); color: var(--ink); font-size: 14px; }
+header { padding: 12px 20px; border-bottom: 1px solid var(--line); background: var(--panel); display:flex; gap: 20px; align-items: baseline; flex-wrap: wrap; }
+header h1 { font-size: 15px; margin: 0; font-weight: 650; }
+header h1 code { font-family: var(--mono); font-weight: 500; }
+header .facts { color: var(--muted); font-size: 13px; display: flex; gap: 16px; flex-wrap: wrap; }
+header .facts b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+main { display: grid; grid-template-columns: minmax(280px, 360px) minmax(0, 1fr) minmax(300px, 380px); height: calc(100vh - 49px); }
+nav, section, aside { overflow: auto; min-width: 0; }
+nav { border-right: 1px solid var(--line); background: var(--panel); padding: 10px; }
+aside { border-left: 1px solid var(--line); background: var(--panel); padding: 12px 14px; }
+section { padding: 12px 18px; }
+.k { color: var(--muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; margin: 14px 0 6px; }
+.k:first-child { margin-top: 4px; }
+details.module > summary { cursor: pointer; font-weight: 600; font-size: 13px; padding: 6px 6px; list-style: none; display: grid; grid-template-columns: 1fr 64px 52px; gap: 8px; align-items: center; }
+details.module > summary::-webkit-details-marker { display: none; }
+details.module > summary .name { font-family: var(--mono); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fn { display: grid; grid-template-columns: 1fr 64px 52px; gap: 8px; align-items: center; padding: 4px 6px 4px 18px; border-radius: 4px; cursor: pointer; }
+.fn:hover, .fn.selected { background: rgba(var(--accent-rgb), .12); }
+.fn .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 12px; }
+.bar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; }
+.bar i { display:block; height:100%; background: var(--accent); }
+.bar i.none { background: rgb(var(--cold-rgb)); }
+.ratio { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; }
+h2 { font-size: 14px; margin: 0 0 4px; font-family: var(--mono); font-weight: 600; word-break: break-all; }
+.sub { color: var(--muted); font-size: 12.5px; margin-bottom: 10px; }
+table.src { border-collapse: collapse; font-family: var(--mono); font-size: 12.5px; width: 100%; }
+table.src td { padding: 1px 8px; white-space: pre; vertical-align: top; line-height: 1.5; }
+td.n { color: var(--muted); text-align: right; user-select: none; width: 56px; cursor: pointer; }
+td.c { text-align: right; width: 72px; font-variant-numeric: tabular-nums; color: var(--muted); }
+tr.miss td.code, tr.miss td.c { background: rgba(var(--cold-rgb), .13); }
+tr.miss td.c { color: rgb(var(--cold-rgb)); }
+tr.sel td { box-shadow: inset 3px 0 0 var(--accent); }
+tr.target td.n { box-shadow: inset -3px 0 0 var(--hot); }
+tr.plain td.code { color: var(--muted); }
+textarea { width: 100%; font-family: var(--mono); font-size: 12px; min-height: 84px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); color: var(--ink); padding: 6px; resize: vertical; }
+button { font: inherit; font-size: 13px; padding: 5px 10px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 4px; cursor: pointer; margin: 4px 4px 4px 0; }
+button:hover { border-color: var(--accent); }
+.target { padding: 6px 8px; border: 1px solid var(--line); border-radius: 4px; margin-bottom: 6px; font-size: 12.5px; cursor: pointer; }
+.target code { font-family: var(--mono); }
+.target.hit { border-left: 3px solid var(--accent); }
+.target.missed { border-left: 3px solid rgb(var(--cold-rgb)); }
+.sample { font-family: var(--mono); font-size: 12px; margin: 4px 0; white-space: pre-wrap; word-break: break-all; }
+.sample span { color: var(--muted); font-family: var(--sans); }
+.legend { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+.legend i { display: inline-block; width: 12px; height: 12px; vertical-align: -2px; margin: 0 4px 0 8px; border-radius: 2px; }
+.empty { color: var(--muted); padding: 24px 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>crabcheck coverage of <code id="prop"></code></h1>
+  <div class="facts" id="facts"></div>
+</header>
+<main>
+  <nav id="tree"></nav>
+  <section id="source"><div class="empty">Pick a function on the left. Click a line number to select it, shift-click to extend the selection, then turn it into a target on the right.</div></section>
+  <aside id="focus"></aside>
+</main>
+<script id="data" type="application/json">__CRABCHECK_DATA__</script>
+<script>
+(function () {
+  var data = JSON.parse(document.getElementById("data").textContent);
+  var files = data.files;
+  var byFile = {};
+  files.forEach(function (f, i) { byFile[f.path] = i; });
+  var functions = [];
+  files.forEach(function (f, fi) {
+    f.functions.forEach(function (fn) { fn.file = fi; functions.push(fn); });
+  });
+  functions.sort(function (a, b) { return a.module < b.module ? -1 : a.module > b.module ? 1 : a.start - b.start; });
+
+  function esc(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+  function pct(a, b) { return b ? Math.round(100 * a / b) + "%" : "–"; }
+  function display(path) { return files[path].display; }
+
+  document.getElementById("prop").textContent = data.property;
+  document.getElementById("facts").innerHTML =
+    "<span><b>" + data.tests + "</b> tests</span><span><b>" + data.inputs + "</b> inputs observed</span>" +
+    "<span>filter <b>" + esc(data.filter) + "</b></span><span>seed <b>" + data.seed + "</b></span>" +
+    "<span><b>" + data.functions_reached + "</b> of <b>" + functions.length + "</b> functions reached</span>" +
+    "<span>" + esc(data.generated) + "</span>";
+
+  // ---- tree -------------------------------------------------------------
+  var modules = {};
+  functions.forEach(function (fn) { (modules[fn.module] = modules[fn.module] || []).push(fn); });
+  var tree = document.getElementById("tree");
+  var html = "";
+  Object.keys(modules).sort().forEach(function (m) {
+    var fns = modules[m];
+    var reached = fns.filter(function (f) { return f.inputs > 0; }).length;
+    var hitLines = 0, totalLines = 0;
+    fns.forEach(function (f) { f.lines.forEach(function (l) { totalLines++; if (l[1] > 0) hitLines++; }); });
+    html += '<details class="module" open><summary><span class="name" title="' + esc(m) + '">' + esc(m) + '</span>' +
+      '<span class="bar"><i class="' + (hitLines ? "" : "none") + '" style="width:' + pct(hitLines, totalLines) + '"></i></span>' +
+      '<span class="ratio">' + reached + "/" + fns.length + "</span></summary>";
+    fns.forEach(function (f) {
+      var hl = f.lines.filter(function (l) { return l[1] > 0; }).length;
+      html += '<div class="fn" data-fn="' + functions.indexOf(f) + '" title="' + esc(f.name) + " in " + esc(display(f.file)) + '">' +
+        '<span class="name">' + esc(f.name.replace(m + "::", "")) + '</span>' +
+        '<span class="bar"><i class="' + (hl ? "" : "none") + '" style="width:' + pct(hl, f.lines.length) + '"></i></span>' +
+        '<span class="ratio">' + hl + "/" + f.lines.length + "</span></div>";
+    });
+    html += "</details>";
+  });
+  tree.innerHTML = html || '<div class="empty">No instrumented functions were tracked.</div>';
+
+  // ---- source -----------------------------------------------------------
+  var selected = null, selStart = null, selEnd = null;
+  function targetsOn(fileIdx, line) {
+    return data.targets.some(function (t) { return t.file_index === fileIdx && t.begin_line <= line && line <= t.end_line; });
+  }
+  function renderSource() {
+    var fn = functions[selected];
+    var file = files[fn.file];
+    var counts = {};
+    fn.lines.forEach(function (l) { counts[l[0]] = l; });
+    var max = 1;
+    fn.lines.forEach(function (l) { if (l[1] > max) max = l[1]; });
+    var out = "<h2>" + esc(fn.name) + "</h2><div class=\"sub\">" + esc(file.display) + ":" + fn.start + "–" + fn.end +
+      " · entered by <b>" + fn.inputs + "</b> of " + data.inputs + " inputs</div>" +
+      '<div class="legend">columns: inputs that executed the line, executions in total.<i style="background:rgba(var(--accent-rgb),.35)"></i>executed<i style="background:rgba(var(--cold-rgb),.25)"></i>never executed</div>' +
+      '<table class="src"><tbody>';
+    var first = Math.max(1, fn.start), last = fn.end;
+    for (var line = first; line <= last; line++) {
+      var l = counts[line];
+      var text = file.source ? (file.source[line - 1] || "") : "";
+      var cls = l ? (l[1] > 0 ? "hit" : "miss") : "plain";
+      if (selStart !== null && line >= Math.min(selStart, selEnd) && line <= Math.max(selStart, selEnd)) cls += " sel";
+      if (targetsOn(fn.file, line)) cls += " target";
+      var heat = l && l[1] > 0 ? (0.08 + 0.32 * l[1] / max).toFixed(2) : 0;
+      var style = l && l[1] > 0 ? ' style="background:rgba(var(--accent-rgb),' + heat + ')"' : "";
+      out += '<tr class="' + cls + '" data-line="' + line + '"><td class="n">' + line + '</td>' +
+        '<td class="c">' + (l ? l[1] : "") + '</td><td class="c">' + (l ? l[2] : "") + '</td>' +
+        '<td class="code"' + style + '>' + esc(text) + "</td></tr>";
+    }
+    out += "</tbody></table>";
+    if (!file.source) out = out.replace('<table', '<div class="sub">Source not found at ' + esc(file.path) + '; counts only.</div><table');
+    document.getElementById("source").innerHTML = out;
+  }
+  document.getElementById("source").addEventListener("click", function (e) {
+    var td = e.target.closest("td.n");
+    if (!td || selected === null) return;
+    var line = parseInt(td.parentNode.getAttribute("data-line"), 10);
+    if (e.shiftKey && selStart !== null) selEnd = line; else { selStart = line; selEnd = line; }
+    renderSource(); renderFocus();
+  });
+  tree.addEventListener("click", function (e) {
+    var el = e.target.closest(".fn");
+    if (!el) return;
+    selectFn(parseInt(el.getAttribute("data-fn"), 10));
+  });
+  function selectFn(i) {
+    selected = i; selStart = null; selEnd = null;
+    Array.prototype.forEach.call(tree.querySelectorAll(".fn"), function (n) { n.classList.toggle("selected", n.getAttribute("data-fn") == i); });
+    renderSource(); renderFocus();
+  }
+
+  // ---- focus ------------------------------------------------------------
+  function targetLine(fileDisplay, a, b) {
+    return JSON.stringify({ file: fileDisplay, begin_line: Math.min(a, b), end_line: Math.max(a, b) });
+  }
+  function brief(fn, a, b) {
+    var file = files[fn.file];
+    var lo = Math.min(a, b), hi = Math.max(a, b);
+    var lines = fn.lines.filter(function (l) { return l[0] >= lo && l[0] <= hi; });
+    var hit = lines.filter(function (l) { return l[1] > 0; }).length;
+    var text = "Coverage target for property `" + data.property + "` (seed " + data.seed + "):\n" +
+      "  " + file.display + ":" + lo + (hi !== lo ? "-" + hi : "") + " in `" + fn.name + "`\n" +
+      "  the function was entered by " + fn.inputs + " of " + data.inputs + " inputs; " + hit + " of " + lines.length + " selected lines were ever executed.\n";
+    if (file.source) {
+      text += "  source:\n";
+      for (var i = lo; i <= hi; i++) text += "    " + i + " | " + (file.source[i - 1] || "") + "\n";
+    }
+    if (data.samples.length) {
+      text += "  inputs the generator currently produces:\n";
+      data.samples.forEach(function (s) { text += "    " + s.debug + "  (" + s.origin + ", size " + s.size + ")\n"; });
+    }
+    text += "  goal: change the generator (or add a dependent/targeted generator) so inputs reach these lines; " +
+      "add the target line above to .crabcheck/targets.jsonl so the next run reports whether it was reached.";
+    return text;
+  }
+  function copyFrom(id) {
+    var el = document.getElementById(id);
+    el.select();
+    if (navigator.clipboard) navigator.clipboard.writeText(el.value); else document.execCommand("copy");
+  }
+  function renderFocus() {
+    var out = "";
+    if (selected !== null) {
+      var fn = functions[selected];
+      var a = selStart === null ? fn.start : selStart, b = selEnd === null ? fn.end : selEnd;
+      out += '<div class="k">Focus</div><div class="sub">' + (selStart === null ? "whole function" : "lines " + Math.min(a, b) + "–" + Math.max(a, b)) + " of <code>" + esc(fn.name) + "</code></div>" +
+        '<div class="k">targets.jsonl line</div><textarea id="tl" readonly>' + esc(targetLine(files[fn.file].display, a, b)) + '</textarea>' +
+        '<button data-copy="tl">Copy target</button>' +
+        '<div class="k">Brief for the agent</div><textarea id="br" readonly style="min-height:200px">' + esc(brief(fn, a, b)) + '</textarea>' +
+        '<button data-copy="br">Copy brief</button>';
+    }
+    out += '<div class="k">Targets in this run</div>';
+    if (!data.targets.length) out += '<div class="sub">none; select lines to make one.</div>';
+    data.targets.forEach(function (t, i) {
+      var state = t.functions.length === 0 ? "matches no instrumented code" : t.hits > 0 ? "hit by " + t.hits + " inputs, first at input " + t.first_hit_at :
+        "never reached; function entered by " + t.function_inputs + " inputs";
+      out += '<div class="target ' + (t.hits > 0 ? "hit" : "missed") + '" data-target="' + i + '"><code>' + esc(t.file) + ":" + t.begin_line + (t.end_line !== t.begin_line ? "-" + t.end_line : "") + "</code><br>" + esc(state) + "</div>";
+    });
+    if (data.samples.length) {
+      out += '<div class="k">Sampled inputs</div>';
+      data.samples.forEach(function (s) { out += '<div class="sample">' + esc(s.debug) + ' <span>(' + s.origin + ", size " + s.size + ")</span></div>"; });
+    }
+    document.getElementById("focus").innerHTML = out;
+  }
+  document.getElementById("focus").addEventListener("click", function (e) {
+    var b = e.target.closest("button[data-copy]");
+    if (b) { copyFrom(b.getAttribute("data-copy")); b.textContent = "Copied"; return; }
+    var t = e.target.closest(".target");
+    if (t) {
+      var target = data.targets[parseInt(t.getAttribute("data-target"), 10)];
+      var idx = -1;
+      functions.forEach(function (f, i) { if (f.file === target.file_index && f.start <= target.begin_line && target.end_line <= f.end) idx = i; });
+      if (idx >= 0) { selectFn(idx); selStart = target.begin_line; selEnd = target.end_line; renderSource(); renderFocus(); }
+    }
+  });
+
+  renderFocus();
+  var firstMissed = functions.findIndex(function (f) { return f.inputs > 0 && f.lines.some(function (l) { return l[1] === 0; }); });
+  if (firstMissed >= 0) selectFn(firstMissed); else if (functions.length) selectFn(0);
+})();
+</script>
+</body>
+</html>
