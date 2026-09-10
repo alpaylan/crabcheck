@@ -60,6 +60,7 @@ button:hover { border-color: var(--accent); }
 <header>
   <h1>crabcheck coverage of <code id="prop"></code></h1>
   <div class="facts" id="facts"></div>
+  <a id="home" href="/" hidden style="margin-left:auto">all properties</a>
 </header>
 <main>
   <nav id="tree"></nav>
@@ -115,7 +116,16 @@ button:hover { border-color: var(--accent); }
   tree.innerHTML = html || '<div class="empty">No instrumented functions were tracked.</div>';
 
   // ---- source -----------------------------------------------------------
-  var selected = null, selStart = null, selEnd = null;
+  var selected = null, selStart = null, selEnd = null, live = false;
+  if (/^https?:$/.test(location.protocol)) {
+    fetch("/api/state", { cache: "no-store" }).then(function (r) { return r.ok ? r.json() : null; }).then(function (s) {
+      if (!s) return;
+      live = true;
+      document.getElementById("home").hidden = false;
+      renderFocus();
+    }).catch(function () {});
+    try { new EventSource("/api/events").onmessage = function (e) { if (e.data === "pages") location.reload(); }; } catch (e) {}
+  }
   function targetsOn(fileIdx, line) {
     return data.targets.some(function (t) { return t.file_index === fileIdx && t.begin_line <= line && line <= t.end_line; });
   }
@@ -201,7 +211,7 @@ button:hover { border-color: var(--accent); }
       var a = selStart === null ? fn.start : selStart, b = selEnd === null ? fn.end : selEnd;
       out += '<div class="k">Focus</div><div class="sub">' + (selStart === null ? "whole function" : "lines " + Math.min(a, b) + "–" + Math.max(a, b)) + " of <code>" + esc(fn.name) + "</code></div>" +
         '<div class="k">targets.jsonl line</div><textarea id="tl" readonly>' + esc(targetLine(files[fn.file].display, a, b)) + '</textarea>' +
-        '<button data-copy="tl">Copy target</button>' +
+        '<button data-copy="tl">Copy target</button>' + (live ? '<button data-add="1">Add to targets.jsonl</button><span id="added" class="sub"></span>' : "") +
         '<div class="k">Brief for the agent</div><textarea id="br" readonly style="min-height:200px">' + esc(brief(fn, a, b)) + '</textarea>' +
         '<button data-copy="br">Copy brief</button>';
     }
@@ -221,6 +231,15 @@ button:hover { border-color: var(--accent); }
   document.getElementById("focus").addEventListener("click", function (e) {
     var b = e.target.closest("button[data-copy]");
     if (b) { copyFrom(b.getAttribute("data-copy")); b.textContent = "Copied"; return; }
+    var add = e.target.closest("button[data-add]");
+    if (add && selected !== null) {
+      var fn = functions[selected];
+      var a = selStart === null ? fn.start : selStart, bb = selEnd === null ? fn.end : selEnd;
+      fetch("/api/targets", { method: "POST", headers: { "Content-Type": "application/json" }, body: targetLine(files[fn.file].display, a, bb) })
+        .then(function (r) { document.getElementById("added").textContent = r.ok ? " added; rerun the tests to see whether it is reached" : " could not add (" + r.status + ")"; })
+        .catch(function () { document.getElementById("added").textContent = " could not reach the server"; });
+      return;
+    }
     var t = e.target.closest(".target");
     if (t) {
       var target = data.targets[parseInt(t.getAttribute("data-target"), 10)];

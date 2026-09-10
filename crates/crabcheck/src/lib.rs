@@ -108,6 +108,8 @@ mod primitives;
 pub mod regressions;
 pub mod report;
 pub mod runner;
+#[cfg(feature = "serve")]
+pub mod serve;
 mod shrink;
 pub mod source;
 mod verify;

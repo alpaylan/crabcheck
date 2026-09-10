@@ -3,6 +3,7 @@ source: crates/crabcheck/tests/reports/main.rs
 expression: "serde_json::to_string_pretty(&report).expect(\"report serializes\")"
 ---
 {
+  "name": "x_at_most_y",
   "status": "Failed",
   "seed": 24301,
   "tests": 0,

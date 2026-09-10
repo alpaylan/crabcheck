@@ -66,7 +66,9 @@
 //! the selection); the panel on the right then shows the `targets.jsonl`
 //! line for the selection and a brief describing the target, its current
 //! coverage and what the generator produces, to hand to whoever rewrites
-//! the generator. Needs the `json` feature.
+//! the generator. Needs the `json` feature. With the `serve` feature,
+//! `crabcheck serve` shows these pages live and adds the selection to
+//! `targets.jsonl` with one click (see [`crate::serve`]).
 //!
 //! # Regions and branches
 //!

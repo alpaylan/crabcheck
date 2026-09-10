@@ -99,6 +99,14 @@ library verifies them and makes every failure reproducible from its seed.
   semantics), the targets and their outcomes, and the sampled inputs.
   Selecting lines produces the `targets.jsonl` entry and a brief for the
   agent that will change the generator.
+- `crabcheck serve` (feature `serve`; `cargo install crabcheck --features
+  serve`, or `cargo run --features serve --bin crabcheck -- serve`): a
+  local page over `.crabcheck`: the coverage grid pages, the latest
+  report per property from `reports.jsonl`, and `targets.jsonl`. Served
+  grid pages gain an "Add to targets.jsonl" button and every page reloads
+  when the files change, closing the loop of pick a region, add it as a
+  target, rerun (or let an agent rewrite the generator), see the outcome.
+  Standard-library HTTP on 127.0.0.1 only; it never runs commands.
 - Fault localization in core (`Config::locate`, on by default when
   coverage is collected): the coverage mapping (`__llvm_covmap` and
   `__llvm_covfun`, versions 4 to 7) is read from the running executable,

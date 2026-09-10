@@ -24,6 +24,14 @@ coverage = ["dep:rustc-demangle", "dep:miniz_oxide", "dep:object"]
 # Assume the build is instrumented even when the build script cannot see
 # the flag (profile rustflags, `cargo rustc -- ...`).
 coverage-force = ["coverage"]
+# The `crabcheck serve` command: a local page over coverage grids, reports
+# and targets.
+serve = ["json"]
+
+[[bin]]
+name = "crabcheck"
+path = "src/bin/crabcheck.rs"
+required-features = ["serve"]
 
 [dependencies]
 rustc-demangle = { version = "0.1", optional = true }

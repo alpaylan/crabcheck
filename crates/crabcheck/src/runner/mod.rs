@@ -785,7 +785,7 @@ where
             config,
             generator,
             property,
-            report: Report::new(seed, config.max_size),
+            report: Report { name: name.clone(), ..Report::new(seed, config.max_size) },
             seed,
             name,
             started: Instant::now(),
