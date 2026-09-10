@@ -102,6 +102,7 @@ pub mod coverage;
 pub mod gens;
 mod health;
 pub mod hooks;
+pub mod loops;
 mod pool;
 mod primitives;
 #[cfg(feature = "json")]

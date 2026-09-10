@@ -137,6 +137,19 @@ library verifies them and makes every failure reproducible from its seed.
   `shrunk_to` records the loop's own result; `failure` and `generator`
   give a loop what it needs to write a shrinker. The coverage lock
   became a `Lease` that may move between threads, so a `Run` can own it.
+- `crabcheck::loops`: loops shipped with the library on the steps of
+  `Run`, after Etna's PropLang: `fuzz` (feedback: coverage novelty, the
+  new `Tested::novelty`), `target` (the property's score) and
+  `perf_fuzz` (the property's time, the new `Tested::elapsed`), over a
+  `SeedPool` policy: `Fifo`, `Filo`, `Heap`, `Singleton` (static,
+  monotonic, resetting) and `DoubleQueue`, which also keeps discarded
+  inputs as low-priority seeds; `with_energy` sets a pool's mutations per
+  seed. `fuzz` keeps every input that reached new coverage; `target` and
+  `perf_fuzz` keep what the pool calls useful (hill climbing by default).
+  `localize` (feature `coverage`) is the fault-localization loop: after
+  a failure it shrinks, then tests mutants of the minimal input until the
+  top suspect of `Run::suspects` (the ranking as it stands) has not
+  changed for a while. Examples `shipped_loops` and `perf_fuzz`.
 - The property's own function (the closure passed to `check`, or the
   body of a `#[crabcheck::test]`) is always tracked, whichever crate it
   lives in, and the grid page pins it above the tree.

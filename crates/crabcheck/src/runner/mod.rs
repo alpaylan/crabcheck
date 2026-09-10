@@ -330,7 +330,11 @@ impl CoverageState {
                 },
             }
         }
-        Covered { novel: observation.novel || target_hit, lines }
+        Covered {
+            novel: observation.novel || target_hit,
+            novelty: observation.novelty + u32::from(target_hit),
+            lines,
+        }
     }
 }
 
@@ -338,6 +342,8 @@ impl CoverageState {
 #[derive(Default)]
 struct Covered {
     novel: bool,
+    /// Counters, hit-count classes and targets reached for the first time.
+    novelty: u32,
     lines: Option<BTreeMap<String, Vec<u32>>>,
 }
 
@@ -874,7 +880,9 @@ pub enum Verdict {
 pub struct Tested {
     verdict: Verdict,
     novel: bool,
+    novelty: u32,
     score: Option<f64>,
+    elapsed: std::time::Duration,
 }
 
 impl Tested {
@@ -902,6 +910,18 @@ impl Tested {
     /// instrumented build); otherwise always false.
     pub fn novel(&self) -> bool {
         self.novel
+    }
+
+    /// How many counters, hit-count classes of a counter, or coverage
+    /// targets the input reached for the first time in this run: the size
+    /// of its novelty. Zero without coverage.
+    pub fn novelty(&self) -> u32 {
+        self.novelty
+    }
+
+    /// How long the property took on the input.
+    pub fn elapsed(&self) -> std::time::Duration {
+        self.elapsed
     }
 
     /// The score the property reported through [`target`](crate::target),
@@ -1145,6 +1165,7 @@ where
         let (result, observed, elapsed) = self.evaluate(input.value.clone());
         let covered = self.coverage.end(before, &result, observing);
         let novel = covered.novel;
+        let novelty = covered.novelty;
         let limit = self.config.report.truncate_debug_at;
         let (value, point) = (&input.value, input.point);
         let provenance = || {
@@ -1181,18 +1202,23 @@ where
                         provenance,
                     );
                 }
-                (Tested { verdict: Verdict::Passed, novel, score }, Ok(Outcome::Pass))
+                (
+                    Tested { verdict: Verdict::Passed, novel, novelty, score, elapsed },
+                    Ok(Outcome::Pass),
+                )
             },
             Ok(Outcome::Discard(reason)) => {
                 if record {
                     self.record_discard(reason.clone());
                 }
                 (
-                    Tested { verdict: Verdict::Discarded, novel, score: None },
+                    Tested { verdict: Verdict::Discarded, novel, novelty, score: None, elapsed },
                     Ok(Outcome::Discard(reason)),
                 )
             },
-            result => (Tested { verdict: Verdict::Failed, novel, score: None }, result),
+            result => {
+                (Tested { verdict: Verdict::Failed, novel, novelty, score: None, elapsed }, result)
+            },
         }
     }
 
@@ -1726,6 +1752,20 @@ where
                 ),
             );
         }
+    }
+
+    /// The fault-localization ranking as it stands: the functions and
+    /// regions whose coverage separates the failing inputs tested so far
+    /// from the passing ones, with the failure's panic site as a prior.
+    /// `None` without a failure, or without coverage (`coverage` feature,
+    /// instrumented build, [`Config::locate`] on).
+    #[cfg(feature = "coverage")]
+    pub fn suspects(&self) -> Option<crate::coverage::Locate> {
+        let spectrum = self.coverage.spectrum.as_ref()?;
+        let (found, _) = self.pending.as_ref()?;
+        let signature = Signature::of(&found.result)?;
+        let panic = signature.panic_site.as_ref().map(|(file, line)| (file.as_str(), *line));
+        Some(spectrum.rank(panic, self.config.locate.top))
     }
 
     /// The report so far.

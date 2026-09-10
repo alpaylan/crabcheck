@@ -182,6 +182,19 @@ run.shrunk_to(current);
 `finish` reports whatever the loop settled on, and only shrinks itself
 when the loop did nothing.
 
+Three loops ship in `crabcheck::loops`, after the loops of Etna's
+PropLang: `fuzz` (feedback: coverage novelty), `target` (feedback: the
+property's `target` score) and `perf_fuzz` (feedback: how long the
+property took), each over a seed pool policy that decides whether to
+generate or to mutate a seed next: `Fifo` and `Filo` queues with energy,
+a `Heap` that mutates the best seed, three `Singleton` policies, and a
+`DoubleQueue` that keeps discarded inputs as low-priority seeds for
+properties with hard preconditions. A pool of your own is an
+implementation of `SeedPool`. After a failure, `loops::localize` keeps
+testing mutants of the minimal failing input until the ranking of
+suspect functions (`run.suspects()`) stops changing. See
+`examples/shipped_loops.rs` and `examples/perf_fuzz.rs`.
+
 ## Reproducing and steering runs
 
 | Variable | Effect |

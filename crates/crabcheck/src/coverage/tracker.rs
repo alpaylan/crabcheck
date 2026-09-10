@@ -65,6 +65,9 @@ pub(crate) struct Observation {
     /// Whether the input reached a counter, or a hit-count class, never
     /// seen before in this run.
     pub novel: bool,
+    /// How many counters, or hit-count classes, it reached for the first
+    /// time.
+    pub novelty: u32,
 }
 
 impl Tracker {
@@ -137,6 +140,7 @@ impl Tracker {
         let after = snapshot_range(&self.window).unwrap_or_else(|| before.clone());
         let delta = before.delta(&after);
         let mut novel = false;
+        let mut novelty = 0u32;
         let mut grew = false;
         for &(index, count) in delta.hits() {
             let slot = index - self.window.start;
@@ -149,6 +153,7 @@ impl Tracker {
             if class > self.virgin[slot] {
                 self.virgin[slot] = class;
                 novel = true;
+                novelty += 1;
             }
         }
         if novel {
@@ -159,7 +164,7 @@ impl Tracker {
         if grew {
             self.growth.push(self.inputs, self.hit_so_far as u64);
         }
-        Observation { delta, novel }
+        Observation { delta, novel, novelty }
     }
 
     /// Summary for the report.
