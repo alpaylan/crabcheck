@@ -13,11 +13,14 @@ rust-version.workspace = true
 include = ["src/**", "Cargo.toml", "README.md", "CHANGELOG.md", "LICENSE"]
 
 [features]
-default = ["json"]
-# JSON reports and config files (serde + serde_json).
+default = ["json", "derive"]
+# JSON reports, config files and the regressions file (serde + serde_json).
 json = ["dep:serde", "dep:serde_json"]
+# `#[derive(Arbitrary)]` and `#[crabcheck::test]`.
+derive = ["dep:crabcheck-macros"]
 
 [dependencies]
+crabcheck-macros = { version = "0.2.0-dev", path = "../crabcheck-macros", optional = true }
 rand_core = "0.9"
 rand_chacha = "0.9"
 serde = { version = "1.0", features = ["derive"], optional = true }

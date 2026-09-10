@@ -64,7 +64,7 @@ In order to test the profiling, you need to activate the mutation using `maraude
 
 ```bash
 $ marauders set --variant insert_1
-$ cargo llvm-cov run --example bst --features profiling -- insert_post
+$ cargo llvm-cov run --example bst_locate --features profiling -- insert_post
 $  ./instrumentation.sh # this step might take a couple minutes long
 $ cargo run --release --bin analysis # this step also takes roughly 10-15 seconds
 ```

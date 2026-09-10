@@ -60,6 +60,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo build -p crabcheck --no-default-features
+      - run: cargo build -p crabcheck --no-default-features --features json
+      - run: cargo build -p crabcheck --no-default-features --features derive
       - run: cargo build -p crabcheck --all-features
       - run: cargo test -p crabcheck --no-default-features
 
@@ -90,7 +92,7 @@ jobs:
       - name: Only source, manifest, README, CHANGELOG and LICENSE may ship
         run: |
           cargo package -p crabcheck --list --allow-dirty | tee package.txt
-          if grep -vE '^(src/|Cargo\.toml$|Cargo\.toml\.orig$|Cargo\.lock$|\.cargo_vcs_info\.json$|README\.md$|CHANGELOG\.md$|LICENSE$)' package.txt; then
+          if grep -vE '^(src/|tests/|Cargo\.toml$|Cargo\.toml\.orig$|Cargo\.lock$|\.cargo_vcs_info\.json$|README\.md$|CHANGELOG\.md$|LICENSE$)' package.txt; then
             echo "::error::unexpected files in package (see above)"; exit 1
           fi
 

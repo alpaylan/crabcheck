@@ -1,0 +1,21 @@
+[package]
+name = "crabcheck-macros"
+description = "Derive and attribute macros for crabcheck (use through the `crabcheck` crate)"
+version = "0.2.0-dev"
+edition = "2024"
+repository.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+include = ["src/**", "Cargo.toml", "LICENSE"]
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2 = "1.0"
+quote = "1.0"
+syn = { version = "2.0", features = ["full"] }
+
+[lints.rust]
+missing_docs = "warn"

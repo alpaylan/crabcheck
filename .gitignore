@@ -10,6 +10,9 @@ build/
 .vscode/
 .DS_Store
 
+# crabcheck regressions written by failing example/test runs in this repo
+.crabcheck/
+
 # Coverage and profiling artifacts produced by crabcheck-locate runs
 *.profraw
 *.profdata
