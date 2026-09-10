@@ -26,6 +26,16 @@ dependencies = [
 
 [[package]]
 name = "crabcheck"
+version = "0.2.0-dev"
+dependencies = [
+ "rand_chacha",
+ "rand_core",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "crabcheck-locate"
 version = "0.1.0"
 dependencies = [
  "cpu-time",

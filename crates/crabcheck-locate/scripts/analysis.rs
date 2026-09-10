@@ -1,5 +1,5 @@
 use {
-    crabcheck::sbfl::Suspiciousness,
+    crabcheck_locate::sbfl::Suspiciousness,
     rayon::prelude::*,
     serde::{
         Deserialize,
@@ -77,7 +77,7 @@ fn extract_region_counts(json_path: &Path, module: &str) -> HashMap<RegionKey, u
     let Some(data_arr) = root.get("data").and_then(|v| v.as_array()) else {
         return regions;
     };
-    let Some(entry) = data_arr.get(0) else {
+    let Some(entry) = data_arr.first() else {
         return regions;
     };
     let Some(functions) = entry.get("functions").and_then(|v| v.as_array()) else {
@@ -94,7 +94,7 @@ fn extract_region_counts(json_path: &Path, module: &str) -> HashMap<RegionKey, u
         let Some(filenames) = func.get("filenames").and_then(|v| v.as_array()) else {
             continue;
         };
-        let Some(fname0) = filenames.get(0).and_then(|v| v.as_str()) else {
+        let Some(fname0) = filenames.first().and_then(|v| v.as_str()) else {
             continue;
         };
         let fname = fname0.to_string();

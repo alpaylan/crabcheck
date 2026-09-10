@@ -1,4 +1,4 @@
-use crabcheck::{
+use crabcheck_locate::{
     fuzzing::maximizing_fuzz_loop,
     targeting::maximizing_targeting_loop,
     utils::with_time,

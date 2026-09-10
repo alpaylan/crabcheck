@@ -1,70 +1,23 @@
-# Crabcheck
+# crabcheck
 
-A WIP property-based testing library in Rust, built with generalized targeted-property testing in
-mind.
+Property-based testing for Rust, designed for tests written by coding agents.
 
-## What is property-based testing?
+This repository is a Cargo workspace:
 
-TODO
+| Crate | Purpose | Status |
+|---|---|---|
+| [`crates/crabcheck`](crates/crabcheck) | The library: generators, choice-tree shrinking, targeted mutation, seed replay, JSON reports | 0.2 rewrite in progress |
+| [`crates/crabcheck-locate`](crates/crabcheck-locate) | Coverage-guided fault localization (the 0.1.0 research code) | Unpublished; to be ported onto the 0.2 core |
+| [`examples/locate-demo`](examples/locate-demo) | Standalone example of the fault-localization flow | Builds against `crabcheck-locate` |
 
-## Example usage
-
-```rust
-use crabcheck::quickcheck::quickcheck;
-
-fn correct_insertion_sort(arr: &mut [i32]) {
-    for i in 1..arr.len() {
-        let mut j = i;
-        while j > 0 && arr[j - 1] > arr[j] {
-            arr.swap(j - 1, j);
-            j -= 1;
-        }
-    }
-}
-
-fn bugged_insertion_sort(arr: &mut [i32]) {
-    for i in 1..arr.len() - 1 {
-        let mut j = i;
-        while j > 0 && arr[j - 1] > arr[j] {
-            arr.swap(j - 1, j);
-            j -= 1;
-        }
-    }
-}
-
-fn is_sorted(array: &[i32]) -> bool {
-    array.windows(2).all(|window| window[0] <= window[1])
-}
-
-fn main() {
-    let should_work = quickcheck(|input: &mut Vec<i32>| {
-        correct_insertion_sort(input);
-        is_sorted(input)
-    });
-    assert!(should_work.counterexample.is_none());
-
-    let should_fail = quickcheck(|input: &mut Vec<i32>| {
-        bugged_insertion_sort(input);
-        is_sorted(input)
-    });
-    assert!(should_fail.counterexample.is_some());
-
-    println!(
-        "Counterexample that doesn't work on buggy implementation: {:?}",
-        should_fail.counterexample.unwrap(),
-    );
-}
-```
-
-## Profiling
-
-In order to test the profiling, you need to activate the mutation using `marauders` and run the binary with 
-`cargo-llvm-cov`.
-
+## Developing
 
 ```bash
-$ marauders set --variant insert_1
-$ cargo llvm-cov run --example bst --features profiling -- insert_post
-$  ./instrumentation.sh # this step might take a couple minutes long
-$ cargo run --release --bin analysis # this step also takes roughly 10-15 seconds
+cargo test --workspace                       # stable toolchain
+cargo clippy --workspace --all-targets -- -D warnings
+cargo +nightly fmt --all                     # rustfmt config uses nightly-only options
 ```
+
+## License
+
+MIT. See [LICENSE](LICENSE).

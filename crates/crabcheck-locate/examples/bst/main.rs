@@ -1,6 +1,6 @@
 use {
     bst::Tree,
-    crabcheck::quickcheck::{
+    crabcheck_locate::quickcheck::{
         Arbitrary,
         Mutate,
     },
@@ -16,13 +16,12 @@ use {
         prop_union_post,
         prop_union_valid,
     },
-    std::i32,
 };
 
 #[cfg(feature = "profiling")]
-use crabcheck::profiling::quickcheck;
+use crabcheck_locate::profiling::quickcheck;
 #[cfg(not(feature = "profiling"))]
-use crabcheck::quickcheck::quickcheck;
+use crabcheck_locate::quickcheck::quickcheck;
 
 pub mod bst;
 pub mod spec;
@@ -59,11 +58,9 @@ fn mut_tree<R: Rng>(rng: &mut R, t: &Tree, n: usize, lo: i32, hi: i32) -> Tree {
                 },
                 1 => {
                     // mutate the key between the left and right
-                    let left_root =
-                        if let Tree::T(_, k, _, _) = l.as_ref() { *k } else { i32::MIN.max(lo) };
+                    let left_root = if let Tree::T(_, k, _, _) = l.as_ref() { *k } else { lo };
 
-                    let right_root =
-                        if let Tree::T(_, k, _, _) = r.as_ref() { *k } else { i32::MAX.min(hi) };
+                    let right_root = if let Tree::T(_, k, _, _) = r.as_ref() { *k } else { hi };
 
                     if left_root + 1 >= right_root {
                         return Tree::E;
@@ -74,12 +71,12 @@ fn mut_tree<R: Rng>(rng: &mut R, t: &Tree, n: usize, lo: i32, hi: i32) -> Tree {
                 },
                 2 => {
                     // mutate the left tree
-                    let new_l = mut_tree(rng, &l, n - 1, lo, *k);
+                    let new_l = mut_tree(rng, l, n - 1, lo, *k);
                     Tree::T(Box::new(new_l), *k, *v, r.clone())
                 },
                 _ => {
                     // mutate the right tree
-                    let new_r = mut_tree(rng, &r, n - 1, *k + 1, hi);
+                    let new_r = mut_tree(rng, r, n - 1, *k + 1, hi);
                     Tree::T(l.clone(), *k, *v, Box::new(new_r))
                 },
             }
@@ -115,11 +112,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     match r.status {
-        crabcheck::quickcheck::ResultStatus::Finished => println!("All tests passed!"),
-        crabcheck::quickcheck::ResultStatus::Failed { .. } => println!("A test failed!"),
-        crabcheck::quickcheck::ResultStatus::GaveUp => println!("Gave up!"),
-        crabcheck::quickcheck::ResultStatus::TimedOut => println!("Timed out!"),
-        crabcheck::quickcheck::ResultStatus::Aborted { error } => {
+        crabcheck_locate::quickcheck::ResultStatus::Finished => println!("All tests passed!"),
+        crabcheck_locate::quickcheck::ResultStatus::Failed { .. } => println!("A test failed!"),
+        crabcheck_locate::quickcheck::ResultStatus::GaveUp => println!("Gave up!"),
+        crabcheck_locate::quickcheck::ResultStatus::TimedOut => println!("Timed out!"),
+        crabcheck_locate::quickcheck::ResultStatus::Aborted { error } => {
             println!("Aborted due to error: {}", error);
         },
     }

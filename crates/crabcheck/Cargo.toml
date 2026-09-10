@@ -1,0 +1,27 @@
+[package]
+name = "crabcheck"
+description = "Property-based testing with choice-tree shrinking, targeted mutation, and seed replay, designed for tests written by coding agents"
+version = "0.2.0-dev"
+edition = "2024"
+categories = ["development-tools::testing"]
+keywords = ["property-based-testing", "pbt", "quickcheck", "shrinking", "fuzzing"]
+readme = "README.md"
+repository.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+include = ["src/**", "Cargo.toml", "README.md", "CHANGELOG.md", "LICENSE"]
+
+[features]
+default = ["json"]
+# JSON reports and config files (serde + serde_json).
+json = ["dep:serde", "dep:serde_json"]
+
+[dependencies]
+rand_core = "0.9"
+rand_chacha = "0.9"
+serde = { version = "1.0", features = ["derive"], optional = true }
+serde_json = { version = "1.0", optional = true }
+
+[lints.rust]
+missing_docs = "warn"

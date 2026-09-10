@@ -1,4 +1,4 @@
-use crabcheck::quickcheck::{
+use crabcheck_locate::quickcheck::{
     ResultStatus,
     quickcheck,
 };
@@ -36,7 +36,7 @@ fn main() {
 
     let should_fail = quickcheck(|mut input: Vec<i32>| {
         bugged_insertion_sort(&mut input);
-        Some(is_sorted(&mut input))
+        Some(is_sorted(&input))
     });
     assert!(matches!(should_fail.status, ResultStatus::Failed { .. }));
 }

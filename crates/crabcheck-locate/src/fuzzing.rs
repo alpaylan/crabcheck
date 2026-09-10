@@ -52,7 +52,10 @@ pub fn maximizing_fuzz_loop<
 
         #[cfg(feature = "profiling")]
         if std::env::var("SNAPSHOT").is_ok() {
-            crate::profiling::snapshot(format!("iteration_{i}").as_str());
+            crate::profiling::snapshot(
+                std::path::Path::new("coverage"),
+                format!("iteration_{i}").as_str(),
+            );
             crate::profiling::reset();
         }
     }

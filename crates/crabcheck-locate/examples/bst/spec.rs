@@ -1,4 +1,4 @@
-use crabcheck::quickcheck::Implies;
+use crabcheck_locate::quickcheck::Implies;
 
 use crate::bst::*;
 

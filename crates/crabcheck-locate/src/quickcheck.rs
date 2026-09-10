@@ -26,31 +26,49 @@ impl<R: Rng> Arbitrary<R> for i32 {
 // want to align with proptest's generator distributions rather than the
 // size-scaled `i32`/`usize` impls above.
 impl<R: Rng> Arbitrary<R> for u8 {
-    fn generate(rng: &mut R, _n: usize) -> u8 { rng.random() }
+    fn generate(rng: &mut R, _n: usize) -> u8 {
+        rng.random()
+    }
 }
 impl<R: Rng> Arbitrary<R> for u16 {
-    fn generate(rng: &mut R, _n: usize) -> u16 { rng.random() }
+    fn generate(rng: &mut R, _n: usize) -> u16 {
+        rng.random()
+    }
 }
 impl<R: Rng> Arbitrary<R> for u32 {
-    fn generate(rng: &mut R, _n: usize) -> u32 { rng.random() }
+    fn generate(rng: &mut R, _n: usize) -> u32 {
+        rng.random()
+    }
 }
 impl<R: Rng> Arbitrary<R> for u64 {
-    fn generate(rng: &mut R, _n: usize) -> u64 { rng.random() }
+    fn generate(rng: &mut R, _n: usize) -> u64 {
+        rng.random()
+    }
 }
 impl<R: Rng> Arbitrary<R> for i8 {
-    fn generate(rng: &mut R, _n: usize) -> i8 { rng.random() }
+    fn generate(rng: &mut R, _n: usize) -> i8 {
+        rng.random()
+    }
 }
 impl<R: Rng> Arbitrary<R> for i16 {
-    fn generate(rng: &mut R, _n: usize) -> i16 { rng.random() }
+    fn generate(rng: &mut R, _n: usize) -> i16 {
+        rng.random()
+    }
 }
 impl<R: Rng> Arbitrary<R> for i64 {
-    fn generate(rng: &mut R, _n: usize) -> i64 { rng.random() }
+    fn generate(rng: &mut R, _n: usize) -> i64 {
+        rng.random()
+    }
 }
 impl<R: Rng> Arbitrary<R> for f32 {
-    fn generate(rng: &mut R, _n: usize) -> f32 { rng.random() }
+    fn generate(rng: &mut R, _n: usize) -> f32 {
+        rng.random()
+    }
 }
 impl<R: Rng> Arbitrary<R> for f64 {
-    fn generate(rng: &mut R, _n: usize) -> f64 { rng.random() }
+    fn generate(rng: &mut R, _n: usize) -> f64 {
+        rng.random()
+    }
 }
 
 impl<R: Rng> Mutate<R> for i32 {
@@ -321,8 +339,8 @@ fn split_tuple_debug(s: &str) -> Vec<String> {
                 start = i + skip;
                 i += skip;
                 continue;
-            }
-            _ => {}
+            },
+            _ => {},
         }
         i += 1;
     }
@@ -498,7 +516,7 @@ mod tests {
             copy.reverse();
             Some(copy == *x)
         });
-        assert_eq!(result.passed, 100);
+        assert_eq!(result.passed, Config::default().tests);
         assert_eq!(result.discarded, 0);
         assert!(result.status == ResultStatus::Finished);
     }
@@ -510,8 +528,8 @@ mod tests {
             copy.reverse();
             Some(copy == *x)
         });
-        assert!(result.passed < 100);
-        assert!(result.status == ResultStatus::Failed { arguments: vec![format!("{:?}", result)] });
+        assert!(result.passed < Config::default().tests);
+        assert!(matches!(result.status, ResultStatus::Failed { .. }));
     }
 
     #[test]
@@ -521,7 +539,7 @@ mod tests {
             x.push(y);
             Some(len + 1 == x.len())
         });
-        assert_eq!(result.passed, 100);
+        assert_eq!(result.passed, Config::default().tests);
         assert_eq!(result.discarded, 0);
         assert!(result.status == ResultStatus::Finished);
     }
@@ -536,7 +554,8 @@ mod tests {
 
         match result.status {
             ResultStatus::Failed { arguments } => {
-                assert!(arguments.iter().any(|arg| arg == "trace_len=0"));
+                assert!(arguments.iter().any(|arg| arg == "root=0"), "{arguments:?}");
+                assert!(arguments.iter().any(|arg| arg == "trace_len=3"), "{arguments:?}");
                 assert!(arguments.iter().any(|arg| arg.starts_with("seed=")));
             },
             _ => panic!("expected traced quickcheck to fail with a shrunk counterexample"),

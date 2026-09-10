@@ -10,10 +10,17 @@
 #[cfg(feature = "profiling")]
 use {
     rustc_demangle::demangle,
-    serde_json::{Map, Value},
+    serde_json::{
+        Map,
+        Value,
+    },
     std::{
         env,
-        io::{self, Read, Write},
+        io::{
+            self,
+            Read,
+            Write,
+        },
     },
 };
 

@@ -1,19 +1,18 @@
-# Build
-build
+# Build output (any crate in the tree, including standalone examples)
+target/
+build/
 
 # Environment
 .env
 
-# JetBrains IDEs
-.idea
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
 
-# Rust
-/target
-Cargo.lock
-
-# Visual Studio Code
-.vscode
-
-# data
-jsondata/
+# Coverage and profiling artifacts produced by crabcheck-locate runs
+*.profraw
+*.profdata
+coverage/
 profdata/
+jsondata/

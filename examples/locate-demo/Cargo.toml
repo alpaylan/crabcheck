@@ -1,0 +1,20 @@
+[package]
+name = "locate_demo"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "locate_demo"
+path = "src/lib.rs"
+
+[[bin]]
+name = "locate_demo"
+path = "src/main.rs"
+
+[dependencies]
+crabcheck-locate = { path = "../../crates/crabcheck-locate", features = ["profiling"] }
+rand = { version = "0.9", default-features = false, features = ["os_rng", "small_rng", "thread_rng"] }
+
+[workspace]
+# Standalone — not a member of crabcheck's (nonexistent) workspace.

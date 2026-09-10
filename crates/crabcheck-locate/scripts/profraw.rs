@@ -271,6 +271,6 @@ fn main() {
         std::process::exit(1);
     }
 
-    let profraw_path = &args[1];
+    let _profraw_path = &args[1];
     // Read and process the .profraw file
 }
