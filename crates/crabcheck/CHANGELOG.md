@@ -101,6 +101,12 @@ library verifies them and makes every failure reproducible from its seed.
   passing tests; `Report::covers` carries the shares and a `cover`
   warning fires when a label is met by fewer than
   `Config::coverage.min_cover` of the tests.
+- `gens::dependent(outer, |a| inner)` (and `GenExt::dependent`): a pair
+  whose second value is drawn from a generator chosen by the first. Both
+  values are kept, so the pair shrinks and mutates within the joint
+  support (`b` under `f(&a)`; `a` under `outer` with `b` regenerated
+  from `f(&a')`). This is how generation depends on computation without
+  losing hooks; `and_then` remains the generate-only bind.
 - `crabcheck-macros` (default `derive` feature): `#[derive(Arbitrary)]`
   with `#[crabcheck(gen = ...)]` field overrides, and `#[crabcheck::test]`.
 

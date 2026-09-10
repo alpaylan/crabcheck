@@ -146,14 +146,27 @@ pub trait GenExt: Gen + Sized {
     }
 
     /// Generate a value, then generate the final value with a generator
-    /// chosen from it. No hooks of its own; prefer `map` or `iso` when a
-    /// pure function will do.
+    /// chosen from it. No hooks of its own: the first value is not kept, so
+    /// nothing can be shrunk within the second generator's support. Use
+    /// [`dependent`](GenExt::dependent) to keep both values and their hooks,
+    /// or `map`/`iso` when a pure function will do.
     fn and_then<H, F>(self, f: F) -> AndThen<Self, F>
     where
         H: Gen,
         F: Fn(Self::Value) -> H + Send + Sync,
     {
         AndThen { inner: self, f }
+    }
+
+    /// Pair each value with one drawn from a generator chosen by it, keeping
+    /// both and their hooks. See [`dependent`].
+    fn dependent<H, F>(self, f: F) -> Dependent<Self, F>
+    where
+        Self::Value: Clone,
+        H: Gen,
+        F: Fn(&Self::Value) -> H + Send + Sync,
+    {
+        Dependent { outer: self, f }
     }
 
     /// Keep only values for which `predicate` holds. After
@@ -255,6 +268,87 @@ where
     fn mutate(&self, value: &U, g: &mut Source) -> Option<U> {
         self.inner.mutate(&(self.back)(value), g).map(&self.forward)
     }
+}
+
+/// See [`GenExt::dependent`].
+pub struct Dependent<G, F> {
+    outer: G,
+    f: F,
+}
+
+/// Seed of the source that regenerates the dependent half while shrinking;
+/// candidates must be a pure function of the value.
+const REGENERATE_SEED: u64 = 0x6465_7065_6e64_656e;
+
+impl<G, H, F> Gen for Dependent<G, F>
+where
+    G: Gen,
+    G::Value: Clone,
+    H: Gen,
+    F: Fn(&G::Value) -> H + Send + Sync,
+{
+    type Value = (G::Value, H::Value);
+
+    fn generate(&self, g: &mut Source) -> Self::Value {
+        let a = self.outer.generate(g);
+        let b = (self.f)(&a).generate(g);
+        (a, b)
+    }
+
+    /// Shrink the first value and regenerate the second from its new
+    /// generator at size 0 (the smallest dependent value, which later steps
+    /// shrink further), then shrink the second value under its own
+    /// generator. Every candidate lies in the joint support.
+    fn shrink(&self, (a, b): &Self::Value) -> Vec<Self::Value> {
+        let mut out = Vec::new();
+        for (i, a2) in self.outer.shrink(a).into_iter().enumerate() {
+            let mut source = Source::new(crate::runner::mix(REGENERATE_SEED, i as u64), 0);
+            let b2 = (self.f)(&a2).generate(&mut source);
+            out.push((a2, b2));
+        }
+        out.extend((self.f)(a).shrink(b).into_iter().map(|b2| (a.clone(), b2)));
+        out
+    }
+
+    /// Mutate the second value under its generator, or the first value with
+    /// the second regenerated from the new generator; whichever the coin
+    /// picks first, falling back to the other.
+    fn mutate(&self, (a, b): &Self::Value, g: &mut Source) -> Option<Self::Value> {
+        let inner_first = g.bool();
+        let inner = |g: &mut Source| (self.f)(a).mutate(b, g).map(|b2| (a.clone(), b2));
+        let outer = |g: &mut Source| {
+            self.outer.mutate(a, g).map(|a2| {
+                let b2 = (self.f)(&a2).generate(g);
+                (a2, b2)
+            })
+        };
+        if inner_first { inner(g).or_else(|| outer(g)) } else { outer(g).or_else(|| inner(g)) }
+    }
+}
+
+/// A pair whose second value is drawn from a generator chosen by the first:
+/// `f(&a)` returns the generator for `b`. Both values are kept, so the pair
+/// shrinks and mutates within the joint support: `b` under `f(&a)`, and `a`
+/// under `outer` with `b` regenerated from `f(&a')`. This is how generation
+/// depends on computation without losing the hooks that
+/// [`and_then`](GenExt::and_then) drops.
+///
+/// ```
+/// use crabcheck::{check, gens, Config};
+///
+/// // A non-empty vector and a valid index into it.
+/// let indexed = gens::dependent(gens::vec(gens::int(0..=100)).len(1..=8), |v| gens::int(0..v.len()));
+/// let report = check(&Config::default().tests(200), indexed, |(v, i)| v[i] <= 100);
+/// report.assert_passed();
+/// ```
+pub fn dependent<G, H, F>(outer: G, f: F) -> Dependent<G, F>
+where
+    G: Gen,
+    G::Value: Clone,
+    H: Gen,
+    F: Fn(&G::Value) -> H + Send + Sync,
+{
+    Dependent { outer, f }
 }
 
 /// See [`GenExt::and_then`].
@@ -588,5 +682,76 @@ mod tests {
         let candidates = set.shrink(&s);
         assert!(candidates.iter().all(|c| c.len() <= 3));
         assert!(candidates.iter().any(|c| c.len() == 2));
+    }
+}
+
+#[cfg(test)]
+mod dependent_tests {
+    use crate::{
+        Config,
+        Gen,
+        Source,
+        check,
+        check_generator,
+        check_mutator,
+        check_shrinker,
+        gens,
+    };
+
+    fn cfg() -> Config {
+        Config::default().tests(300).seed(7)
+    }
+
+    /// `(n, k)` with `k < n`.
+    fn bounded() -> impl Gen<Value = (i32, i32)> {
+        gens::dependent(gens::int(1..=20), |&n| gens::int(0..n))
+    }
+
+    #[test]
+    fn dependent_pairs_stay_in_the_joint_support() {
+        let support = |(n, k): &(i32, i32)| (1..=20).contains(n) && (0..*n).contains(k);
+        check_generator(&cfg(), bounded(), support).assert_passed();
+        check_shrinker(&cfg(), bounded(), support, |(n, k)| (*n as u64) * 32 + *k as u64)
+            .assert_passed();
+        check_mutator(&cfg(), bounded(), support).assert_passed();
+    }
+
+    #[test]
+    fn shrinking_regenerates_the_dependent_half() {
+        let g = bounded();
+        let candidates = g.shrink(&(7, 6));
+        assert!(!candidates.is_empty());
+        assert!(candidates.iter().all(|(n, k)| *n <= 7 && *k < *n), "{candidates:?}");
+        assert!(candidates.iter().any(|(n, _)| *n < 7), "the outer value shrinks");
+        assert!(candidates.iter().any(|(n, k)| *n == 7 && *k < 6), "the inner value shrinks");
+        assert_eq!(candidates, g.shrink(&(7, 6)), "candidates are a pure function of the value");
+    }
+
+    #[test]
+    fn a_failing_dependent_input_shrinks_to_the_minimum() {
+        let indexed =
+            gens::dependent(gens::vec(gens::int(0..=100)).len(1..=8), |v| gens::int(0..v.len()));
+        let report = check(&cfg(), indexed, |(v, i)| v[i] < 50);
+        let failure = report.failure.as_ref().expect("fails");
+        let shrunk =
+            failure.shrunk.as_ref().map(|c| c.debug.as_str()).unwrap_or(&failure.original.debug);
+        assert_eq!(shrunk, "([50], 0)", "{report}");
+    }
+
+    #[test]
+    fn mutation_keeps_the_pair_consistent() {
+        let g = bounded();
+        let mut source = Source::new(3, 10);
+        let mut moved_outer = false;
+        let mut moved_inner = false;
+        for _ in 0..200 {
+            let (n, k) = g.generate(&mut source);
+            if let Some((n2, k2)) = g.mutate(&(n, k), &mut source) {
+                assert!((1..=20).contains(&n2) && k2 < n2, "({n2}, {k2}) from ({n}, {k})");
+                moved_outer |= n2 != n;
+                moved_inner |= n2 == n && k2 != k;
+            }
+        }
+        assert!(moved_outer && moved_inner);
     }
 }
