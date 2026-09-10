@@ -159,6 +159,13 @@ frozen. Coverage-guided search and fault localization now live in this
 crate behind the `coverage` feature; the 0.1 file-based pipeline in
 `crates/crabcheck-locate` is superseded and kept only for reference.
 
+Planned: PerfFuzz-style search, where inputs that set a new maximum
+execution count on any counter are kept and the total path length is the
+score when the property reports none, with the hottest input and functions
+in the report. Today coverage-guided search rewards new code only (AFL
+hit-count classes saturate at 128), and performance search needs a
+hand-written `target` score.
+
 ## License
 
 MIT.
