@@ -1,0 +1,71 @@
+---
+source: crates/crabcheck/tests/reports/main.rs
+expression: "serde_json::to_string_pretty(&report).expect(\"report serializes\")"
+---
+{
+  "status": "Failed",
+  "seed": 24301,
+  "tests": 0,
+  "discarded": 0,
+  "iterations": 0,
+  "stopped_by_budget": false,
+  "max_size": 100,
+  "threads": 1,
+  "duration": "[duration]",
+  "gen_time": "[duration]",
+  "prop_time": "[duration]",
+  "distinct_inputs_ratio": 1.0,
+  "failure": {
+    "kind": "False",
+    "message": null,
+    "location": null,
+    "original": {
+      "debug": "[7, 6, 9, 4, 6, 9, 9, 8, 0]",
+      "truncated": false,
+      "size": 93,
+      "iteration": 0,
+      "thread": null
+    },
+    "shrunk": {
+      "debug": "[0, 0, 0]",
+      "truncated": false,
+      "size": 93,
+      "iteration": 0,
+      "thread": null
+    },
+    "replay": {
+      "seed": 24301,
+      "iteration": 0
+    },
+    "flaky": false,
+    "shrink": {
+      "steps": 13,
+      "accepted": 4,
+      "rejected_not_smaller": 0,
+      "rejected_seen": 10,
+      "budget_exhausted": false,
+      "duration": "[duration]"
+    }
+  },
+  "abort": null,
+  "replay": {
+    "point": {
+      "seed": 24301,
+      "iteration": 0
+    },
+    "reproduced": true
+  },
+  "regressions": {
+    "file": null,
+    "replayed": 0,
+    "stale": 0,
+    "saved": false
+  },
+  "target": null,
+  "profraw": null,
+  "covers": {},
+  "labels": {},
+  "sizes": {},
+  "discard_reasons": {},
+  "health": []
+}

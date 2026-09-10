@@ -1,0 +1,8 @@
+---
+source: crates/crabcheck/tests/reports/main.rs
+expression: report.to_string()
+---
+crabcheck: GAVE UP after 2001 discarded inputs (29 tests passed), seed 24301
+  discards: not zero x2001
+  warning [discard_ratio]: 99% of inputs were discarded (mostly `not zero`, 2001 times); generate valid inputs directly instead of filtering
+  warning [low_distinct_inputs]: only 5% of generated inputs were distinct; the generator's space is small or max_size (100) is too low

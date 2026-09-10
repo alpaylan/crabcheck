@@ -1,0 +1,67 @@
+---
+source: crates/crabcheck/tests/reports/main.rs
+expression: "serde_json::to_string_pretty(&report).expect(\"report serializes\")"
+---
+{
+  "status": "Failed",
+  "seed": 24301,
+  "tests": 7,
+  "discarded": 0,
+  "iterations": 8,
+  "stopped_by_budget": false,
+  "max_size": 100,
+  "threads": 1,
+  "duration": "[duration]",
+  "gen_time": "[duration]",
+  "prop_time": "[duration]",
+  "distinct_inputs_ratio": 1.0,
+  "failure": {
+    "kind": "Error",
+    "message": "\"406 is divisible by seven\"",
+    "location": null,
+    "original": {
+      "debug": "406",
+      "truncated": false,
+      "size": 87,
+      "iteration": 7,
+      "thread": null
+    },
+    "shrunk": null,
+    "replay": {
+      "seed": 24301,
+      "iteration": 7
+    },
+    "flaky": false,
+    "shrink": {
+      "steps": 9,
+      "accepted": 0,
+      "rejected_not_smaller": 0,
+      "rejected_seen": 0,
+      "budget_exhausted": false,
+      "duration": "[duration]"
+    }
+  },
+  "abort": null,
+  "replay": null,
+  "regressions": {
+    "file": null,
+    "replayed": 0,
+    "stale": 0,
+    "saved": false
+  },
+  "target": null,
+  "profraw": null,
+  "covers": {},
+  "labels": {},
+  "sizes": {
+    "12": 1,
+    "22": 1,
+    "26": 1,
+    "27": 1,
+    "66": 1,
+    "93": 1,
+    "100": 1
+  },
+  "discard_reasons": {},
+  "health": []
+}

@@ -1,0 +1,16 @@
+---
+source: crates/crabcheck/tests/reports/main.rs
+expression: text
+---
+exit: 0
+--- stdout ---
+crabcheck: ok, 10000 tests passed (0 discarded) in [ms], seed 7
+  labels: empty 16%, long 48%
+crabcheck: FAILED, property returned false
+  counterexample: [1, 0]
+  original:       [867, -21, -189, -910, 805, -122, 433] (size 7, iteration 1)
+  shrinking: 18 of 70 candidates accepted in [ms]
+  after 1 passing tests (0 discarded) in [ms]
+  reproduce: CRABCHECK_REPLAY=7:1
+  or rerun the whole search: Config::default().seed(7)
+--- stderr ---

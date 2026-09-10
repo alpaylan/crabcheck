@@ -25,7 +25,13 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo +nightly fmt --all                                 # rustfmt config uses nightly-only options
 cargo run -p crabcheck --example bst -- --bug            # see a failure report
 cargo run -p crabcheck --example sort_performance        # see the targeted phase
+cargo test -p crabcheck --test reports                    # report snapshots; review drift with `cargo insta review`
+RUSTFLAGS="-C instrument-coverage" RUST_TEST_THREADS=1 cargo test -p crabcheck --features coverage   # instrumented mode
+ci/package-smoke.sh                                       # build and test a consumer against the packaged crates
 ```
+
+The report text and JSON are snapshot-tested under `crates/crabcheck/tests/reports/`;
+a change to what a report says fails CI until the new snapshot is accepted.
 
 ## License
 

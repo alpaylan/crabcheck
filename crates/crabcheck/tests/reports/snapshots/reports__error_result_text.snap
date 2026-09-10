@@ -1,0 +1,11 @@
+---
+source: crates/crabcheck/tests/reports/main.rs
+expression: report.to_string()
+---
+crabcheck: FAILED, property failed: "406 is divisible by seven"
+  counterexample: 406
+  found at size 87, iteration 7
+  shrinking: 0 of 9 candidates accepted in [ms]
+  after 7 passing tests (0 discarded) in [ms]
+  reproduce: CRABCHECK_REPLAY=24301:7
+  or rerun the whole search: Config::default().seed(24301)

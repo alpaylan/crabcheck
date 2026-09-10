@@ -1,0 +1,10 @@
+---
+source: crates/crabcheck/tests/reports/main.rs
+expression: text
+---
+exit: 0
+--- stdout ---
+crabcheck: ok, 10255 tests passed (0 discarded) in [ms], seed 7
+  target: best score 1 reached by [98, 91, 82, 69, 63, 60, 56, 48, 30, 28, 16, 9] (256 mutated inputs, 12 improvements)
+worst case found: 66 swaps out of a possible 66 (100%)
+--- stderr ---

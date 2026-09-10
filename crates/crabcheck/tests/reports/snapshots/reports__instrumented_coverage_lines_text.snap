@@ -1,0 +1,6 @@
+---
+source: crates/crabcheck/tests/reports/main.rs
+expression: report.to_string()
+---
+crabcheck: ok, 200 tests passed (0 discarded) in [ms], seed 24301
+  coverage: 1 of 1 functions in `reports::planted` reached, 4 of 4 counters

@@ -1,0 +1,11 @@
+---
+source: crates/crabcheck/tests/reports/main.rs
+expression: report.to_string()
+---
+crabcheck: FAILED, property failed: shrink candidate not smaller: size 10 >= 9: 10
+  counterexample: 9
+  original:       10 (size 93, iteration 0)
+  shrinking: 99 of 99 candidates accepted in [ms]
+  after 0 passing tests (0 discarded) in [ms]
+  reproduce: CRABCHECK_REPLAY=24301:0
+  or rerun the whole search: Config::default().seed(24301)

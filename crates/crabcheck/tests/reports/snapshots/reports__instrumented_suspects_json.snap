@@ -1,0 +1,112 @@
+---
+source: crates/crabcheck/tests/reports/main.rs
+expression: "serde_json::to_string_pretty(&report).expect(\"report serializes\")"
+---
+{
+  "status": "Failed",
+  "seed": 24301,
+  "tests": 1,
+  "discarded": 0,
+  "iterations": 2,
+  "stopped_by_budget": false,
+  "max_size": 100,
+  "threads": 1,
+  "duration": "[duration]",
+  "gen_time": "[duration]",
+  "prop_time": "[duration]",
+  "distinct_inputs_ratio": 1.0,
+  "failure": {
+    "kind": "Panic",
+    "message": "planted: too large",
+    "location": {
+      "file": "crates/crabcheck/tests/reports/planted.rs",
+      "line": "[L]",
+      "column": "[C]"
+    },
+    "original": {
+      "debug": "1620",
+      "truncated": false,
+      "size": 66,
+      "iteration": 1,
+      "thread": null
+    },
+    "shrunk": {
+      "debug": "1001",
+      "truncated": false,
+      "size": 66,
+      "iteration": 1,
+      "thread": null
+    },
+    "replay": {
+      "seed": 24301,
+      "iteration": 1
+    },
+    "flaky": false,
+    "shrink": {
+      "steps": 38,
+      "accepted": 6,
+      "rejected_not_smaller": 0,
+      "rejected_seen": 8,
+      "budget_exhausted": false,
+      "duration": "[duration]"
+    }
+  },
+  "abort": null,
+  "replay": null,
+  "regressions": {
+    "file": null,
+    "replayed": 0,
+    "stale": 0,
+    "saved": false
+  },
+  "target": null,
+  "coverage": {
+    "filter": "reports::planted",
+    "functions_reached": 1,
+    "functions_total": 1,
+    "counters_hit": 4,
+    "counters_total": 4,
+    "inputs": 104,
+    "novel_inputs": 3,
+    "last_novelty_at": 63,
+    "unreached": [],
+    "partial": []
+  },
+  "locate": {
+    "passing": 68,
+    "failing": 36,
+    "regions": 9,
+    "suspects": [
+      {
+        "rank": 1,
+        "file": "/Users/akeles/Programming/projects/PbtBenchmark/crabcheck/crates/crabcheck/tests/reports/planted.rs",
+        "function": "reports::planted::classify",
+        "start_line": 5,
+        "end_line": 15,
+        "ef": 36,
+        "ep": 0,
+        "nf": 0,
+        "np": 68,
+        "scores": {
+          "tarantula": 1.0,
+          "ochiai": 1.0,
+          "dstar": 1.7976931348623157e308,
+          "jaccard": 1.0,
+          "op2": 36.0,
+          "delta": 1.0
+        },
+        "panic_overlap": true,
+        "confidence": "High",
+        "rule": "singleton_panic_overlap"
+      }
+    ]
+  },
+  "profraw": null,
+  "covers": {},
+  "labels": {},
+  "sizes": {
+    "93": 1
+  },
+  "discard_reasons": {},
+  "health": []
+}

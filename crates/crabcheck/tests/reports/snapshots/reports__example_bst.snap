@@ -1,0 +1,14 @@
+---
+source: crates/crabcheck/tests/reports/main.rs
+expression: text
+---
+exit: 0
+--- stdout ---
+crabcheck: ok, 1000 tests passed (0 discarded) in [ms], seed 7
+  labels: no shrink candidates 19%
+crabcheck: ok, 1000 tests passed (0 discarded) in [ms], seed 7
+  labels: empty tree 19%, key present 19%
+crabcheck: ok, 1000 tests passed (0 discarded) in [ms], seed 7
+crabcheck: ok, 1000 tests passed (0 discarded) in [ms], seed 7
+crabcheck: ok, 1000 tests passed (0 discarded) in [ms], seed 7
+--- stderr ---

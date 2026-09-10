@@ -14,6 +14,10 @@ env:
   RUSTFLAGS: -D warnings
   RUSTDOCFLAGS: -D warnings
 
+env:
+  # Snapshot drift fails the build; accept changes locally with `cargo insta review`.
+  INSTA_UPDATE: "no"
+
 jobs:
   fmt:
     name: Format (nightly rustfmt)
@@ -110,6 +114,8 @@ jobs:
           if grep -vE '^(src/|tests/|build\.rs$|Cargo\.toml$|Cargo\.toml\.orig$|Cargo\.lock$|\.cargo_vcs_info\.json$|README\.md$|CHANGELOG\.md$|LICENSE$)' package.txt; then
             echo "::error::unexpected files in package (see above)"; exit 1
           fi
+      - name: Build and test a consumer against the packaged crates
+        run: ci/package-smoke.sh
 
   locate-demo:
     name: locate-demo (coverage-instrumented)

@@ -1,0 +1,6 @@
+---
+source: crates/crabcheck/tests/reports/main.rs
+expression: report.to_string()
+---
+crabcheck: ok, 298 tests passed (0 discarded) in [ms], seed 24301
+  target: best score 36 reached by [9, 9, 9, 9] (100 mutated inputs, 6 improvements)

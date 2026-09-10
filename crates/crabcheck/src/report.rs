@@ -237,11 +237,13 @@ pub struct Report {
     /// Coverage of the crate under test, when collected (`coverage` feature,
     /// instrumented build).
     #[cfg(feature = "coverage")]
+    #[cfg_attr(feature = "json", serde(skip_serializing_if = "Option::is_none"))]
     pub coverage: Option<crate::coverage::Summary>,
     /// Fault localization for a failure: the functions ranked by how much
     /// their coverage separates failing runs from passing ones (`coverage`
     /// feature, instrumented build).
     #[cfg(feature = "coverage")]
+    #[cfg_attr(feature = "json", serde(skip_serializing_if = "Option::is_none"))]
     pub locate: Option<crate::coverage::Locate>,
     /// Path of the profraw written for `llvm-cov`, when requested.
     pub profraw: Option<PathBuf>,

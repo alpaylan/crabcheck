@@ -1,0 +1,6 @@
+---
+source: crates/crabcheck/tests/reports/main.rs
+expression: report.to_string()
+---
+crabcheck: ok, 200 tests passed (0 discarded) in [ms], seed 24301
+  labels: empty 21%, long 56%, short 44%

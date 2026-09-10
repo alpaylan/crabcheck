@@ -1,0 +1,69 @@
+---
+source: crates/crabcheck/tests/reports/main.rs
+expression: "serde_json::to_string_pretty(&report).expect(\"report serializes\")"
+---
+{
+  "status": "GaveUp",
+  "seed": 24301,
+  "tests": 29,
+  "discarded": 2001,
+  "iterations": 2030,
+  "stopped_by_budget": false,
+  "max_size": 100,
+  "threads": 1,
+  "duration": "[duration]",
+  "gen_time": "[duration]",
+  "prop_time": "[duration]",
+  "distinct_inputs_ratio": 0.04975369458128079,
+  "failure": null,
+  "abort": null,
+  "replay": null,
+  "regressions": {
+    "file": null,
+    "replayed": 0,
+    "stale": 0,
+    "saved": false
+  },
+  "target": null,
+  "profraw": null,
+  "covers": {},
+  "labels": {},
+  "sizes": {
+    "0": 2,
+    "1": 1,
+    "2": 1,
+    "5": 1,
+    "6": 1,
+    "10": 1,
+    "11": 1,
+    "13": 1,
+    "14": 2,
+    "16": 1,
+    "18": 1,
+    "25": 1,
+    "27": 1,
+    "29": 3,
+    "33": 2,
+    "47": 1,
+    "52": 1,
+    "54": 1,
+    "56": 1,
+    "61": 1,
+    "64": 1,
+    "67": 2,
+    "100": 1
+  },
+  "discard_reasons": {
+    "not zero": 2001
+  },
+  "health": [
+    {
+      "kind": "discard_ratio",
+      "message": "99% of inputs were discarded (mostly `not zero`, 2001 times); generate valid inputs directly instead of filtering"
+    },
+    {
+      "kind": "low_distinct_inputs",
+      "message": "only 5% of generated inputs were distinct; the generator's space is small or max_size (100) is too low"
+    }
+  ]
+}
