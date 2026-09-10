@@ -94,11 +94,16 @@ library verifies them and makes every failure reproducible from its seed.
   its function was entered at all (`coverage_target_missed`).
 - The coverage grid (`Config::coverage.html`, `CRABCHECK_COVERAGE_HTML=dir`,
   needs the `json` feature): one self-contained page per property with
-  every tracked function grouped by module, how many inputs entered each,
-  its source with per-line input and execution counts (innermost-region
-  semantics), the targets and their outcomes, and the sampled inputs.
-  Selecting lines produces the `targets.jsonl` entry and a brief for the
-  agent that will change the generator.
+  every tracked function in a hierarchy read from its demangled name
+  (crate, modules, types, functions, closures under their function; or
+  directories and files), how many inputs entered each, the targets and
+  their outcomes, and the sampled inputs. A map view lays the hierarchy
+  out as a treemap sized by instrumented lines and coloured red through
+  yellow to green by the share executed, zooming from the crate to a function's lines; a source view
+  shows the function's code with per-line input and execution counts
+  (innermost-region semantics). Selecting lines in either view produces
+  the `targets.jsonl` entry and a brief for the agent that will change
+  the generator.
 - `crabcheck serve` (feature `serve`; `cargo install crabcheck --features
   serve`, or `cargo run --features serve --bin crabcheck -- serve`): a
   local page over `.crabcheck`: the coverage grid pages, the latest

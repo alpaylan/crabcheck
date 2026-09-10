@@ -145,8 +145,10 @@ The full list is in the `config` module documentation.
   and coverage targets: name a file and line range in
   `.crabcheck/targets.jsonl` and the search steers toward it and the
   report says whether it got there. `CRABCHECK_COVERAGE_HTML=dir` writes a
-  coverage grid page (modules, functions, lines, targets, samples) where a
-  line range becomes a new target and a brief for the agent.
+  coverage grid page per property: a zoomable map of modules, functions
+  and lines sized by instrumented lines, a source view with per-line
+  counts, the targets and sampled inputs, where a line range becomes a
+  new target and a brief for the agent.
 - `serve`: the `crabcheck serve` command, a local page over `.crabcheck`
   (grid pages, latest reports, targets) with live reload and an
   "Add to targets.jsonl" button on served grid pages.

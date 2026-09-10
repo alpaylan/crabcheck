@@ -5,50 +5,82 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>crabcheck coverage</title>
 <style>
-:root { --bg:#f4f5f8; --panel:#ffffff; --ink:#1b2330; --muted:#69737f; --line:#dfe3ea; --accent:#2f6fed; --accent-rgb:47,111,237; --hot:#d97706; --cold-rgb:198,40,40; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-@media (prefers-color-scheme: dark) { :root { --bg:#11151b; --panel:#181d25; --ink:#e4e8ee; --muted:#96a1b0; --line:#2a3240; --accent:#7ea3ff; --accent-rgb:126,163,255; --hot:#f0a24d; --cold-rgb:239,107,107; } }
+:root { --bg:#f4f5f8; --panel:#ffffff; --ink:#1b2330; --muted:#69737f; --muted-rgb:105,115,127; --line:#dfe3ea; --accent:#2f6fed; --accent-rgb:47,111,237; --hot:#d97706; --cov0-rgb:214,49,49; --cov50-rgb:232,176,32; --cov100-rgb:41,157,74; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+@media (prefers-color-scheme: dark) { :root { --bg:#11151b; --panel:#181d25; --ink:#e4e8ee; --muted:#96a1b0; --muted-rgb:150,161,176; --line:#2a3240; --accent:#7ea3ff; --accent-rgb:126,163,255; --hot:#f0a24d; --cov0-rgb:235,84,84; --cov50-rgb:240,190,60; --cov100-rgb:76,190,104; } }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 body { margin:0; font-family: var(--sans); background: var(--bg); color: var(--ink); font-size: 14px; }
-header { padding: 12px 20px; border-bottom: 1px solid var(--line); background: var(--panel); display:flex; gap: 20px; align-items: baseline; flex-wrap: wrap; }
+header { padding: 12px 20px; border-bottom: 1px solid var(--line); background: var(--panel); display:flex; gap: 20px; align-items: center; flex-wrap: wrap; }
 header h1 { font-size: 15px; margin: 0; font-weight: 650; }
 header h1 code { font-family: var(--mono); font-weight: 500; }
 header .facts { color: var(--muted); font-size: 13px; display: flex; gap: 16px; flex-wrap: wrap; }
 header .facts b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+header .right { margin-left: auto; display: flex; gap: 14px; align-items: center; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 5px; overflow: hidden; }
+.seg button { margin: 0; border: 0; border-radius: 0; padding: 4px 10px; background: var(--panel); color: var(--muted); }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button.on { background: rgba(var(--accent-rgb), .15); color: var(--ink); }
 main { display: grid; grid-template-columns: minmax(280px, 360px) minmax(0, 1fr) minmax(300px, 380px); height: calc(100vh - 49px); }
 nav, section, aside { overflow: auto; min-width: 0; }
 nav { border-right: 1px solid var(--line); background: var(--panel); padding: 10px; }
 aside { border-left: 1px solid var(--line); background: var(--panel); padding: 12px 14px; }
-section { padding: 12px 18px; }
+section { padding: 12px 18px; display: flex; flex-direction: column; }
 .k { color: var(--muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; margin: 14px 0 6px; }
 .k:first-child { margin-top: 4px; }
-details.module > summary { cursor: pointer; font-weight: 600; font-size: 13px; padding: 6px 6px; list-style: none; display: grid; grid-template-columns: 1fr 64px 52px; gap: 8px; align-items: center; }
-details.module > summary::-webkit-details-marker { display: none; }
-details.module > summary .name { font-family: var(--mono); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fn { display: grid; grid-template-columns: 1fr 64px 52px; gap: 8px; align-items: center; padding: 4px 6px 4px 18px; border-radius: 4px; cursor: pointer; }
-.fn:hover, .fn.selected { background: rgba(var(--accent-rgb), .12); }
-.fn .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 12px; }
+nav .tools { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); padding: 0 6px 8px; }
+.row { display: grid; grid-template-columns: 12px 1fr 64px 52px; gap: 6px; align-items: center; padding: 3px 6px; border-radius: 4px; cursor: pointer; font-size: 12px; }
+.row:hover, .row.selected { background: rgba(var(--accent-rgb), .12); }
+.row .name { font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row.dir .name { font-weight: 600; }
+.caret { color: var(--muted); font-size: 10px; text-align: center; user-select: none; }
+.caret.leaf { visibility: hidden; }
 .bar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; }
-.bar i { display:block; height:100%; background: var(--accent); }
-.bar i.none { background: rgb(var(--cold-rgb)); }
+.bar i { display:block; height:100%; }
 .ratio { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; }
 h2 { font-size: 14px; margin: 0 0 4px; font-family: var(--mono); font-weight: 600; word-break: break-all; }
 .sub { color: var(--muted); font-size: 12.5px; margin-bottom: 10px; }
+.sub a, .crumbs a { color: var(--accent); cursor: pointer; text-decoration: none; }
+.sub a:hover, .crumbs a:hover { text-decoration: underline; }
 table.src { border-collapse: collapse; font-family: var(--mono); font-size: 12.5px; width: 100%; }
 table.src td { padding: 1px 8px; white-space: pre; vertical-align: top; line-height: 1.5; }
 td.n { color: var(--muted); text-align: right; user-select: none; width: 56px; cursor: pointer; }
 td.c { text-align: right; width: 72px; font-variant-numeric: tabular-nums; color: var(--muted); }
-tr.miss td.code, tr.miss td.c { background: rgba(var(--cold-rgb), .13); }
-tr.miss td.c { color: rgb(var(--cold-rgb)); }
+tr.miss td.code, tr.miss td.c { background: rgba(var(--cov0-rgb), .18); }
+tr.miss td.c { color: rgb(var(--cov0-rgb)); }
 tr.sel td { box-shadow: inset 3px 0 0 var(--accent); }
 tr.target td.n { box-shadow: inset -3px 0 0 var(--hot); }
 tr.plain td.code { color: var(--muted); }
+#mapwrap { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.crumbs { display: flex; align-items: center; gap: 6px; font-size: 13px; margin-bottom: 8px; flex-wrap: wrap; font-family: var(--mono); }
+.crumbs .sep { color: var(--muted); }
+.crumbs .here { font-weight: 600; }
+.crumbs .sub { margin: 0 0 0 auto; font-family: var(--sans); }
+#map { flex: 1; position: relative; min-height: 0; }
+.cell { position: absolute; overflow: hidden; border: 1px solid var(--bg); border-radius: 3px; cursor: pointer; background: var(--panel); }
+.cell.body { border-style: dashed; border-color: var(--line); }
+.cell:hover { outline: 2px solid var(--accent); z-index: 1; }
+.cell .lab { position: absolute; left: 4px; top: 2px; right: 4px; font-size: 11px; font-family: var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
+.cell .lab b { font-weight: 600; }
+.cell .lab span { color: var(--muted); margin-left: 6px; }
+.tile { position: absolute; border: 1px solid var(--bg); border-radius: 2px; overflow: hidden; }
+#map.stack { overflow: auto; }
+.strip { position: absolute; left: 0; right: 0; display: flex; align-items: center; gap: 10px; padding: 0 8px; font-family: var(--mono); font-size: 12px; white-space: pre; overflow: hidden; border-bottom: 1px solid var(--bg); cursor: pointer; }
+.strip .n { color: var(--muted); width: 40px; text-align: right; flex: none; }
+.strip .c { color: var(--muted); width: 64px; text-align: right; flex: none; font-variant-numeric: tabular-nums; }
+.strip code { overflow: hidden; text-overflow: ellipsis; }
+.strip.plain { color: var(--muted); cursor: default; }
+.strip.miss .c { color: rgb(var(--cov0-rgb)); }
+.strip.line:hover { outline: 2px solid var(--accent); outline-offset: -2px; z-index: 1; }
+.strip.sel { box-shadow: inset 3px 0 0 var(--accent); }
+.strip.target { box-shadow: inset -3px 0 0 var(--hot); }
+.strip.sel.target { box-shadow: inset 3px 0 0 var(--accent), inset -3px 0 0 var(--hot); }
 textarea { width: 100%; font-family: var(--mono); font-size: 12px; min-height: 84px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); color: var(--ink); padding: 6px; resize: vertical; }
 button { font: inherit; font-size: 13px; padding: 5px 10px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 4px; cursor: pointer; margin: 4px 4px 4px 0; }
 button:hover { border-color: var(--accent); }
 .target { padding: 6px 8px; border: 1px solid var(--line); border-radius: 4px; margin-bottom: 6px; font-size: 12.5px; cursor: pointer; }
 .target code { font-family: var(--mono); }
-.target.hit { border-left: 3px solid var(--accent); }
-.target.missed { border-left: 3px solid rgb(var(--cold-rgb)); }
+.target.hit { border-left: 3px solid rgb(var(--cov100-rgb)); }
+.target.missed { border-left: 3px solid rgb(var(--cov0-rgb)); }
 .sample { font-family: var(--mono); font-size: 12px; margin: 4px 0; white-space: pre-wrap; word-break: break-all; }
 .sample span { color: var(--muted); font-family: var(--sans); }
 .legend { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
@@ -60,11 +92,20 @@ button:hover { border-color: var(--accent); }
 <header>
   <h1>crabcheck coverage of <code id="prop"></code></h1>
   <div class="facts" id="facts"></div>
-  <a id="home" href="/" hidden style="margin-left:auto">all properties</a>
+  <div class="right">
+    <div class="seg" id="views"><button data-view="map" class="on">Map</button><button data-view="source">Source</button></div>
+    <a id="home" href="/" hidden>all properties</a>
+  </div>
 </header>
 <main>
-  <nav id="tree"></nav>
-  <section id="source"><div class="empty">Pick a function on the left. Click a line number to select it, shift-click to extend the selection, then turn it into a target on the right.</div></section>
+  <nav>
+    <div class="tools">group by <div class="seg" id="groups"><button data-group="module" class="on">module</button><button data-group="file">file</button></div></div>
+    <div id="tree"></div>
+  </nav>
+  <section>
+    <div id="mapwrap"><div class="crumbs" id="crumbs"></div><div id="map"></div></div>
+    <div id="source" hidden><div class="empty">Pick a function on the left. Click a line number to select it, shift-click to extend the selection, then turn it into a target on the right.</div></div>
+  </section>
   <aside id="focus"></aside>
 </main>
 <script id="data" type="application/json">__CRABCHECK_DATA__</script>
@@ -72,17 +113,15 @@ button:hover { border-color: var(--accent); }
 (function () {
   var data = JSON.parse(document.getElementById("data").textContent);
   var files = data.files;
-  var byFile = {};
-  files.forEach(function (f, i) { byFile[f.path] = i; });
   var functions = [];
   files.forEach(function (f, fi) {
     f.functions.forEach(function (fn) { fn.file = fi; functions.push(fn); });
   });
-  functions.sort(function (a, b) { return a.module < b.module ? -1 : a.module > b.module ? 1 : a.start - b.start; });
 
-  function esc(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
-  function pct(a, b) { return b ? Math.round(100 * a / b) + "%" : "–"; }
+  function esc(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
+  function pct(a, b) { return b ? Math.round(100 * a / b) + "%" : "0%"; }
   function display(path) { return files[path].display; }
+  function token(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
 
   document.getElementById("prop").textContent = data.property;
   document.getElementById("facts").innerHTML =
@@ -91,32 +130,358 @@ button:hover { border-color: var(--accent); }
     "<span><b>" + data.functions_reached + "</b> of <b>" + functions.length + "</b> functions reached</span>" +
     "<span>" + esc(data.generated) + "</span>";
 
-  // ---- tree -------------------------------------------------------------
-  var modules = {};
-  functions.forEach(function (fn) { (modules[fn.module] = modules[fn.module] || []).push(fn); });
-  var tree = document.getElementById("tree");
-  var html = "";
-  Object.keys(modules).sort().forEach(function (m) {
-    var fns = modules[m];
-    var reached = fns.filter(function (f) { return f.inputs > 0; }).length;
-    var hitLines = 0, totalLines = 0;
-    fns.forEach(function (f) { f.lines.forEach(function (l) { totalLines++; if (l[1] > 0) hitLines++; }); });
-    html += '<details class="module" open><summary><span class="name" title="' + esc(m) + '">' + esc(m) + '</span>' +
-      '<span class="bar"><i class="' + (hitLines ? "" : "none") + '" style="width:' + pct(hitLines, totalLines) + '"></i></span>' +
-      '<span class="ratio">' + reached + "/" + fns.length + "</span></summary>";
-    fns.forEach(function (f) {
-      var hl = f.lines.filter(function (l) { return l[1] > 0; }).length;
-      html += '<div class="fn" data-fn="' + functions.indexOf(f) + '" title="' + esc(f.name) + " in " + esc(display(f.file)) + '">' +
-        '<span class="name">' + esc(f.name.replace(m + "::", "")) + '</span>' +
-        '<span class="bar"><i class="' + (hl ? "" : "none") + '" style="width:' + pct(hl, f.lines.length) + '"></i></span>' +
-        '<span class="ratio">' + hl + "/" + f.lines.length + "</span></div>";
+  // ---- hierarchy ----------------------------------------------------------
+  // Split a demangled path on `sep` outside <>, () and [] (a `->` inside a
+  // fn type is not a closing bracket).
+  function splitTop(s, sep) {
+    var out = [], depth = 0, start = 0;
+    for (var i = 0; i < s.length; i++) {
+      var ch = s.charAt(i);
+      if (ch === "<" || ch === "(" || ch === "[") depth++;
+      else if ((ch === ">" && s.charAt(i - 1) !== "-") || ch === ")" || ch === "]") depth = Math.max(0, depth - 1);
+      else if (depth === 0 && s.substr(i, sep.length) === sep) { out.push(s.slice(start, i)); i += sep.length - 1; start = i + 1; }
+    }
+    out.push(s.slice(start));
+    return out;
+  }
+  // `<bst::Tree as Gen>::generate::<u8>` -> ["bst", "Tree", "as Gen", "generate::<u8>"]:
+  // the self type's own path, the trait as a segment, generic arguments
+  // kept with the name they instantiate.
+  function segments(name) {
+    var out = [];
+    splitTop(name, "::").forEach(function (t, i) {
+      if (i === 0 && t.charAt(0) === "<" && t.charAt(t.length - 1) === ">") {
+        var parts = splitTop(t.slice(1, -1), " as ");
+        out = segments(parts[0].replace(/^(&mut |&|\*const |\*mut |dyn |impl )+/, ""));
+        if (parts.length > 1) out.push("as " + parts.slice(1).join(" as "));
+      } else if (t.charAt(0) === "<" && out.length) out[out.length - 1] += "::" + t;
+      else out.push(t);
     });
-    html += "</details>";
-  });
-  tree.innerHTML = html || '<div class="empty">No instrumented functions were tracked.</div>';
+    return out;
+  }
+  var nodes = [], fnNode = [], root = null;
+  // The crate under test: the most common first segment.
+  var crateName = (function () {
+    var counts = {}, best = "";
+    functions.forEach(function (fn) { var s = segments(fn.name)[0]; counts[s] = (counts[s] || 0) + 1; if (counts[s] > (counts[best] || 0)) best = s; });
+    return best;
+  })();
+  function makeNode(key, sep, parent) {
+    var label = key.indexOf("as ") === 0 ? "as " + splitTop(key.slice(3), "::").pop() : key;
+    var n = { id: nodes.length, key: key, label: label, sep: sep, parent: parent, children: {}, order: [], fn: null,
+      total: 0, hit: 0, fns: 0, reached: 0, inputs: 0, start: Infinity, open: false };
+    nodes.push(n);
+    return n;
+  }
+  function build(grouping) {
+    nodes = []; fnNode = [];
+    var top = makeNode("everything", "::", null);
+    functions.forEach(function (fn, i) {
+      var path = [];
+      var segs = segments(fn.name);
+      if (grouping === "file") {
+        display(fn.file).split("/").forEach(function (s) { path.push([s, "/"]); });
+        if (segs.length > 1 && segs[0] === crateName) segs = segs.slice(1);
+      }
+      segs.forEach(function (s) { path.push([s, "::"]); });
+      var node = top;
+      path.forEach(function (p) {
+        var c = node.children[p[0]];
+        if (!c) { c = node.children[p[0]] = makeNode(p[0], p[1], node); node.order.push(p[0]); }
+        node = c;
+      });
+      if (node.fn !== null) { // a second record with the same name
+        var k = "instance " + (node.order.length + 1);
+        node.children[k] = makeNode(k, "::", node); node.order.push(k); node = node.children[k];
+      }
+      node.fn = i;
+    });
+    collapse(top);
+    aggregate(top);
+    while (top.fn === null && top.order.length === 1) { top = top.children[top.order[0]]; top.parent = null; }
+    setOpen(top, 0);
+    nodes.forEach(function (n) { if (n.fn !== null) fnNode[n.fn] = n; });
+    return top;
+  }
+  // Fold chains of single-child containers into one label.
+  function collapse(node) {
+    node.order.forEach(function (k, idx) {
+      var c = node.children[k];
+      collapse(c);
+      while (c.fn === null && c.order.length === 1) {
+        var g = c.children[c.order[0]];
+        g.key = c.key + c.sep + g.key; g.label = c.label + c.sep + g.label; g.parent = node;
+        delete node.children[k]; k = g.key; node.children[k] = g; node.order[idx] = k; c = g;
+      }
+    });
+  }
+  function aggregate(node) {
+    var t = 0, h = 0, f = 0, r = 0, inp = 0, s = Infinity;
+    if (node.fn !== null) {
+      var fn = functions[node.fn];
+      t = fn.lines.length; h = fn.lines.filter(function (l) { return l[1] > 0; }).length; f = 1; r = fn.inputs > 0 ? 1 : 0; inp = fn.inputs; s = fn.start;
+    }
+    node.order.forEach(function (k) {
+      var c = node.children[k];
+      aggregate(c);
+      t += c.total; h += c.hit; f += c.fns; r += c.reached; inp = Math.max(inp, c.inputs); s = Math.min(s, c.start);
+    });
+    node.total = t; node.hit = h; node.fns = f; node.reached = r; node.inputs = inp; node.start = s;
+    node.order.sort(function (a, b) {
+      var x = node.children[a], y = node.children[b], xf = x.fn !== null, yf = y.fn !== null;
+      if (xf !== yf) return xf ? -1 : 1;
+      if (xf) return (functions[x.fn].file - functions[y.fn].file) || (x.start - y.start);
+      return a < b ? -1 : a > b ? 1 : 0;
+    });
+  }
+  function setOpen(node, depth) {
+    node.open = node.fn === null && depth < 2;
+    node.order.forEach(function (k) { setOpen(node.children[k], depth + 1); });
+  }
+  function summary(n) {
+    return n.fn !== null ? n.hit + "/" + n.total + " lines executed, entered by " + n.inputs + " of " + data.inputs + " inputs"
+      : n.reached + "/" + n.fns + " functions reached, " + n.hit + "/" + n.total + " lines executed";
+  }
 
-  // ---- source -----------------------------------------------------------
-  var selected = null, selStart = null, selEnd = null, live = false;
+  // ---- state --------------------------------------------------------------
+  var selected = null, selStart = null, selEnd = null, live = false, view = "map", grouping = "module", zoom = null, zoomLines = false;
+  var storeKey = "crabcheck-grid:" + data.property;
+  function save() {
+    try {
+      var path = []; for (var n = zoom; n && n.parent; n = n.parent) path.unshift(n.key);
+      sessionStorage.setItem(storeKey, JSON.stringify({ view: view, grouping: grouping, zoom: path, lines: zoomLines, selected: selected === null ? null : functions[selected].name, selStart: selStart, selEnd: selEnd }));
+    } catch (e) {}
+  }
+  function restore() {
+    try {
+      var s = JSON.parse(sessionStorage.getItem(storeKey) || "null");
+      if (!s) return false;
+      grouping = s.grouping === "file" ? "file" : "module";
+      view = s.view === "source" ? "source" : "map";
+      root = build(grouping); zoom = root;
+      (s.zoom || []).forEach(function (k) { if (zoom.children[k]) zoom = zoom.children[k]; });
+      zoomLines = !!s.lines;
+      var idx = functions.findIndex(function (f) { return f.name === s.selected; });
+      if (idx >= 0) { selected = idx; selStart = s.selStart; selEnd = s.selEnd; openTo(idx); }
+      return true;
+    } catch (e) { return false; }
+  }
+  function openTo(i) { for (var n = fnNode[i] && fnNode[i].parent; n; n = n.parent) n.open = true; }
+
+  // ---- tree ---------------------------------------------------------------
+  var tree = document.getElementById("tree");
+  function renderTree() {
+    var html = "";
+    function rec(node, depth) {
+      node.order.forEach(function (k) {
+        var c = node.children[k], isFn = c.fn !== null, kids = c.order.length > 0;
+        html += '<div class="row' + (isFn ? " fn" : " dir") + (isFn && c.fn === selected ? " selected" : "") + '" data-node="' + c.id +
+          '" style="padding-left:' + (6 + depth * 12) + 'px" title="' + esc(c.key + ": " + summary(c)) + '">' +
+          '<span class="caret' + (kids ? "" : " leaf") + '" data-toggle="1">' + (c.open ? "▾" : "▸") + '</span>' +
+          '<span class="name">' + esc(c.label) + '</span>' +
+          '<span class="bar"><i style="width:' + pct(c.hit, c.total) + ';background:' + fillOf(c) + '"></i></span>' +
+          '<span class="ratio">' + (isFn ? c.hit + "/" + c.total : c.reached + "/" + c.fns) + '</span></div>';
+        if (kids && c.open) rec(c, depth + 1);
+      });
+    }
+    rec(root, 0);
+    tree.innerHTML = html || '<div class="empty">No instrumented functions were tracked.</div>';
+  }
+  tree.addEventListener("click", function (e) {
+    var row = e.target.closest(".row");
+    if (!row) return;
+    var node = nodes[parseInt(row.getAttribute("data-node"), 10)];
+    if (e.target.closest("[data-toggle]") || (node.fn === null && view === "source")) { node.open = !node.open; renderTree(); return; }
+    if (node.fn === null) { node.open = true; renderTree(); zoomTo(node); return; }
+    selectFn(node.fn);
+    if (view === "map") zoomTo(fnNode[node.fn], true); else refresh();
+  });
+  document.getElementById("groups").addEventListener("click", function (e) {
+    var b = e.target.closest("[data-group]");
+    if (!b || b.getAttribute("data-group") === grouping) return;
+    grouping = b.getAttribute("data-group");
+    root = build(grouping); zoom = root;
+    if (selected !== null) openTo(selected);
+    renderTree(); refresh();
+  });
+  document.getElementById("views").addEventListener("click", function (e) {
+    var b = e.target.closest("[data-view]");
+    if (b) setView(b.getAttribute("data-view"));
+  });
+  function setView(v) {
+    view = v;
+    Array.prototype.forEach.call(document.querySelectorAll("#views button"), function (b) { b.classList.toggle("on", b.getAttribute("data-view") === v); });
+    document.getElementById("mapwrap").hidden = v !== "map";
+    document.getElementById("source").hidden = v !== "source";
+    refresh();
+  }
+  function selectFn(i) {
+    selected = i; selStart = null; selEnd = null;
+    openTo(i);
+    renderTree();
+  }
+  function refresh() {
+    Array.prototype.forEach.call(document.querySelectorAll("#groups button"), function (b) { b.classList.toggle("on", b.getAttribute("data-group") === grouping); });
+    if (view === "source") renderSource(); else renderMap();
+    renderFocus();
+    save();
+  }
+
+  // ---- map ----------------------------------------------------------------
+  function zoomTo(node, lines) { zoom = node; zoomLines = !!lines; if (view !== "map") setView("map"); else refresh(); }
+  function worst(row, sum, side) {
+    var mx = 0, mn = Infinity;
+    row.forEach(function (r) { mx = Math.max(mx, r.area); mn = Math.min(mn, r.area); });
+    var s2 = side * side, sum2 = sum * sum;
+    return Math.max(s2 * mx / sum2, sum2 / (s2 * mn));
+  }
+  // Squarified treemap (Bruls, Huizing, van Wijk): children weighted by
+  // their instrumented lines.
+  function squarify(children, x, y, w, h) {
+    var items = children.map(function (n) { return { node: n, size: Math.max(1, n.total) }; }).sort(function (a, b) { return b.size - a.size; });
+    var total = items.reduce(function (s, i) { return s + i.size; }, 0) || 1, scale = w * h / total;
+    items.forEach(function (i) { i.area = i.size * scale; });
+    var out = [], rect = { x: x, y: y, w: w, h: h }, i = 0;
+    while (i < items.length && rect.w > 0 && rect.h > 0) {
+      var row = [], sum = 0, side = Math.min(rect.w, rect.h);
+      while (i < items.length) {
+        var a = items[i].area;
+        if (row.length && worst(row, sum, side) < worst(row.concat([items[i]]), sum + a, side)) break;
+        row.push(items[i]); sum += a; i++;
+      }
+      if (rect.w >= rect.h) {
+        var cw = sum / rect.h, yy = rect.y;
+        row.forEach(function (r) { var hh = r.area / cw; out.push({ node: r.node, x: rect.x, y: yy, w: cw, h: hh }); yy += hh; });
+        rect.x += cw; rect.w -= cw;
+      } else {
+        var ch = sum / rect.w, xx = rect.x;
+        row.forEach(function (r) { var ww = r.area / ch; out.push({ node: r.node, x: xx, y: rect.y, w: ww, h: ch }); xx += ww; });
+        rect.y += ch; rect.h -= ch;
+      }
+    }
+    return out;
+  }
+  function box(c) { return "left:" + Math.round(c.x) + "px;top:" + Math.round(c.y) + "px;width:" + Math.max(0, Math.round(c.w)) + "px;height:" + Math.max(0, Math.round(c.h)) + "px"; }
+  // Coverage colours: red (nothing executed) through yellow to green, read
+  // from the theme; the accent stays for selection and links.
+  var palette = {};
+  function readPalette() {
+    function rgb(name) { return token(name).split(",").map(Number); }
+    palette = { muted: token("--muted-rgb"), cov: [rgb("--cov0-rgb"), rgb("--cov50-rgb"), rgb("--cov100-rgb")] };
+  }
+  function heat(t) {
+    t = Math.max(0, Math.min(1, t));
+    var a = palette.cov[t < 0.5 ? 0 : 1], b = palette.cov[t < 0.5 ? 1 : 2], u = t < 0.5 ? t * 2 : (t - 0.5) * 2;
+    return a.map(function (v, i) { return Math.round(v + (b[i] - v) * u); }).join(",");
+  }
+  function fillOf(n) {
+    return n.total ? "rgba(" + heat(n.hit / n.total) + ",.72)" : "rgba(" + palette.muted + ",.15)";
+  }
+  // A line's colour: red when no input executed it, else yellow to green by
+  // the share of all observed inputs that did.
+  function lineHeat(l) { return l[1] > 0 ? heat(0.4 + 0.6 * Math.sqrt(l[1] / Math.max(1, data.inputs))) : heat(0); }
+  function targetsOn(fileIdx, line) {
+    return data.targets.some(function (t) { return t.file_index === fileIdx && t.begin_line <= line && line <= t.end_line; });
+  }
+  function lineColor(l) { return "rgba(" + lineHeat(l) + ",.55)"; }
+  // A function's lines as a stack of full-width strips in source order:
+  // lines are all the same size, so their order is what the layout should
+  // keep. The miniature inside a cell shows only the instrumented lines.
+  function miniStack(fn, x0, y0, w, h) {
+    var n = fn.lines.length, html = "";
+    if (!n || w < 4 || h < 4) return "";
+    var sh = h / n;
+    fn.lines.forEach(function (l, i) {
+      html += '<div class="tile" style="' + box({ x: x0, y: y0 + i * sh, w: w, h: sh }) + ';background:' + lineColor(l) + (sh < 3 ? ";border:0" : "") + '"></div>';
+    });
+    return html;
+  }
+  function stackHtml(fn) {
+    var counts = {}, file = files[fn.file], html = "", y = 0;
+    fn.lines.forEach(function (l) { counts[l[0]] = l; });
+    var first = Math.max(1, fn.start), last = fn.end, instrumented = fn.lines.length, others = last - first + 1 - instrumented;
+    var H = document.getElementById("map").clientHeight;
+    var gh = 6, sh = Math.max(14, Math.min(28, (H - others * gh) / Math.max(1, instrumented)));
+    for (var line = first; line <= last; line++) {
+      var l = counts[line], text = file.source ? (file.source[line - 1] || "") : "";
+      var cls = "strip" + (l ? (l[1] > 0 ? " line hit" : " line miss") : " plain");
+      if (selStart !== null && line >= Math.min(selStart, selEnd) && line <= Math.max(selStart, selEnd)) cls += " sel";
+      if (targetsOn(fn.file, line)) cls += " target";
+      var hh = l ? sh : gh;
+      html += '<div class="' + cls + '" style="top:' + Math.round(y) + 'px;height:' + Math.round(hh) + 'px' + (l ? ';background:' + lineColor(l) : "") + '"' +
+        (l ? ' data-line="' + line + '" title="' + esc("line " + line + ": " + l[1] + " inputs, " + l[2] + " executions") + '"' : "") + '>' +
+        (l ? '<span class="n">' + line + '</span><span class="c">' + l[1] + '</span><code>' + esc(text) + "</code>" : "") + "</div>";
+      y += hh;
+    }
+    return html;
+  }
+  // What a node maps as: its children, and for a function with closures
+  // also its own body, so the body and every closure stay reachable.
+  function items(node) {
+    var out = node.order.map(function (k) { return node.children[k]; });
+    if (node.fn !== null) {
+      var fn = functions[node.fn];
+      out.unshift({ id: node.id, body: true, key: node.key, label: "body of " + node.label, fn: node.fn, order: [], children: {},
+        total: fn.lines.length, hit: fn.lines.filter(function (l) { return l[1] > 0; }).length, fns: 1, reached: fn.inputs > 0 ? 1 : 0, inputs: fn.inputs });
+    }
+    return out;
+  }
+  function renderMap() {
+    var map = document.getElementById("map"), W = map.clientWidth, H = map.clientHeight;
+    readPalette();
+    var chain = []; for (var n = zoom; n; n = n.parent) chain.unshift(n);
+    var inBody = zoom.fn !== null && zoomLines && zoom.order.length > 0;
+    var crumbs = chain.map(function (n, i) {
+      return i === chain.length - 1 && !inBody ? '<span class="here">' + esc(n.label) + '</span>' : '<a data-crumb="' + n.id + '">' + esc(n.label) + '</a><span class="sep">›</span>';
+    }).join("") + (inBody ? '<span class="here">body</span>' : "");
+    crumbs += '<span class="sub">' + esc(summary(zoom)) + (zoom.fn !== null ? ' · <a data-open-source="1">view source</a>' : "") + "</span>";
+    document.getElementById("crumbs").innerHTML = crumbs;
+    if (W <= 0 || H <= 0) return;
+    var html = "", stack = zoom.fn !== null && (zoomLines || !zoom.order.length);
+    map.classList.toggle("stack", stack);
+    if (stack) {
+      html = stackHtml(functions[zoom.fn]);
+    } else {
+      squarify(items(zoom), 0, 0, W, H).forEach(function (c) {
+        var n = c.node, labelled = c.w > 56 && c.h > 22;
+        var top = labelled ? 18 : 2, iw = c.w - 6, ih = c.h - top - 4, inner = iw > 20 && ih > 10;
+        html += '<div class="cell' + (n.body ? " body" : "") + '" data-' + (n.body ? "body" : "zoom") + '="' + n.id + '" style="' + box(c) + (inner ? "" : ";background:" + fillOf(n)) + '" title="' + esc(n.key + ": " + summary(n)) + '">';
+        if (labelled) html += '<div class="lab"><b>' + esc(n.label) + '</b><span>' + (n.fn !== null ? n.hit + "/" + n.total : n.reached + "/" + n.fns + " fns") + "</span></div>";
+        if (inner) {
+          if (n.fn !== null && !n.order.length) html += miniStack(functions[n.fn], 2, top, iw, ih);
+          else squarify(items(n), 2, top, iw, ih).forEach(function (t) {
+            html += '<div class="tile" data-' + (t.node.body ? "body" : "zoom") + '="' + t.node.id + '" style="' + box(t) + ';background:' + fillOf(t.node) + '" title="' + esc(t.node.key + ": " + summary(t.node)) + '"></div>';
+          });
+        }
+        html += "</div>";
+      });
+    }
+    map.innerHTML = html || '<div class="empty">Nothing to map.</div>';
+  }
+  document.getElementById("mapwrap").addEventListener("click", function (e) {
+    var a = e.target.closest("[data-crumb]");
+    if (a) { zoomTo(nodes[parseInt(a.getAttribute("data-crumb"), 10)]); return; }
+    var body = e.target.closest("[data-body]");
+    if (body) { var bn = nodes[parseInt(body.getAttribute("data-body"), 10)]; if (bn.fn !== selected) selectFn(bn.fn); zoomTo(bn, true); return; }
+    if (e.target.closest("[data-open-source]")) { setView("source"); return; }
+    var l = e.target.closest("[data-line]");
+    if (l && zoom.fn !== null) {
+      var line = parseInt(l.getAttribute("data-line"), 10);
+      if (e.shiftKey && selStart !== null) selEnd = line; else { selStart = line; selEnd = line; }
+      refresh(); return;
+    }
+    var z = e.target.closest("[data-zoom]");
+    if (z) {
+      var n = nodes[parseInt(z.getAttribute("data-zoom"), 10)];
+      if (n.fn !== null && n.fn !== selected) selectFn(n.fn);
+      zoomTo(n, n.fn !== null && !n.order.length);
+    }
+  });
+  try { matchMedia("(prefers-color-scheme: dark)").addEventListener("change", function () { renderTree(); refresh(); }); } catch (e) {}
+  var resizeTimer = null;
+  window.addEventListener("resize", function () { clearTimeout(resizeTimer); resizeTimer = setTimeout(function () { if (view === "map") renderMap(); }, 80); });
+
+  // ---- source -------------------------------------------------------------
   if (/^https?:$/.test(location.protocol)) {
     fetch("/api/state", { cache: "no-store" }).then(function (r) { return r.ok ? r.json() : null; }).then(function (s) {
       if (!s) return;
@@ -126,19 +491,16 @@ button:hover { border-color: var(--accent); }
     }).catch(function () {});
     try { new EventSource("/api/events").onmessage = function (e) { if (e.data === "pages") location.reload(); }; } catch (e) {}
   }
-  function targetsOn(fileIdx, line) {
-    return data.targets.some(function (t) { return t.file_index === fileIdx && t.begin_line <= line && line <= t.end_line; });
-  }
   function renderSource() {
+    if (selected === null) return;
     var fn = functions[selected];
     var file = files[fn.file];
     var counts = {};
     fn.lines.forEach(function (l) { counts[l[0]] = l; });
-    var max = 1;
-    fn.lines.forEach(function (l) { if (l[1] > max) max = l[1]; });
+    readPalette();
     var out = "<h2>" + esc(fn.name) + "</h2><div class=\"sub\">" + esc(file.display) + ":" + fn.start + "–" + fn.end +
-      " · entered by <b>" + fn.inputs + "</b> of " + data.inputs + " inputs</div>" +
-      '<div class="legend">columns: inputs that executed the line, executions in total.<i style="background:rgba(var(--accent-rgb),.35)"></i>executed<i style="background:rgba(var(--cold-rgb),.25)"></i>never executed</div>' +
+      " · entered by <b>" + fn.inputs + "</b> of " + data.inputs + ' inputs · <a data-map="1">show in map</a></div>' +
+      '<div class="legend">columns: inputs that executed the line, executions in total.<i style="background:rgba(' + heat(1) + ',.6)"></i>executed by most inputs<i style="background:rgba(' + heat(0.4) + ',.6)"></i>by few<i style="background:rgba(' + heat(0) + ',.6)"></i>never</div>' +
       '<table class="src"><tbody>';
     var first = Math.max(1, fn.start), last = fn.end;
     for (var line = first; line <= last; line++) {
@@ -147,8 +509,7 @@ button:hover { border-color: var(--accent); }
       var cls = l ? (l[1] > 0 ? "hit" : "miss") : "plain";
       if (selStart !== null && line >= Math.min(selStart, selEnd) && line <= Math.max(selStart, selEnd)) cls += " sel";
       if (targetsOn(fn.file, line)) cls += " target";
-      var heat = l && l[1] > 0 ? (0.08 + 0.32 * l[1] / max).toFixed(2) : 0;
-      var style = l && l[1] > 0 ? ' style="background:rgba(var(--accent-rgb),' + heat + ')"' : "";
+      var style = l && l[1] > 0 ? ' style="background:rgba(' + lineHeat(l) + ',.28)"' : "";
       out += '<tr class="' + cls + '" data-line="' + line + '"><td class="n">' + line + '</td>' +
         '<td class="c">' + (l ? l[1] : "") + '</td><td class="c">' + (l ? l[2] : "") + '</td>' +
         '<td class="code"' + style + '>' + esc(text) + "</td></tr>";
@@ -158,24 +519,15 @@ button:hover { border-color: var(--accent); }
     document.getElementById("source").innerHTML = out;
   }
   document.getElementById("source").addEventListener("click", function (e) {
+    if (e.target.closest("[data-map]") && selected !== null) { zoomTo(fnNode[selected], true); return; }
     var td = e.target.closest("td.n");
     if (!td || selected === null) return;
     var line = parseInt(td.parentNode.getAttribute("data-line"), 10);
     if (e.shiftKey && selStart !== null) selEnd = line; else { selStart = line; selEnd = line; }
-    renderSource(); renderFocus();
+    refresh();
   });
-  tree.addEventListener("click", function (e) {
-    var el = e.target.closest(".fn");
-    if (!el) return;
-    selectFn(parseInt(el.getAttribute("data-fn"), 10));
-  });
-  function selectFn(i) {
-    selected = i; selStart = null; selEnd = null;
-    Array.prototype.forEach.call(tree.querySelectorAll(".fn"), function (n) { n.classList.toggle("selected", n.getAttribute("data-fn") == i); });
-    renderSource(); renderFocus();
-  }
 
-  // ---- focus ------------------------------------------------------------
+  // ---- focus --------------------------------------------------------------
   function targetLine(fileDisplay, a, b) {
     return JSON.stringify({ file: fileDisplay, begin_line: Math.min(a, b), end_line: Math.max(a, b) });
   }
@@ -245,13 +597,24 @@ button:hover { border-color: var(--accent); }
       var target = data.targets[parseInt(t.getAttribute("data-target"), 10)];
       var idx = -1;
       functions.forEach(function (f, i) { if (f.file === target.file_index && f.start <= target.begin_line && target.end_line <= f.end) idx = i; });
-      if (idx >= 0) { selectFn(idx); selStart = target.begin_line; selEnd = target.end_line; renderSource(); renderFocus(); }
+      if (idx >= 0) {
+        selectFn(idx); selStart = target.begin_line; selEnd = target.end_line;
+        if (view === "map") { zoom = fnNode[idx]; zoomLines = true; }
+        refresh();
+      }
     }
   });
 
-  renderFocus();
-  var firstMissed = functions.findIndex(function (f) { return f.inputs > 0 && f.lines.some(function (l) { return l[1] === 0; }); });
-  if (firstMissed >= 0) selectFn(firstMissed); else if (functions.length) selectFn(0);
+  // ---- start --------------------------------------------------------------
+  if (!restore()) {
+    root = build(grouping); zoom = root;
+    var firstMissed = functions.findIndex(function (f) { return f.inputs > 0 && f.lines.some(function (l) { return l[1] === 0; }); });
+    if (firstMissed >= 0) selected = firstMissed; else if (functions.length) selected = 0;
+    if (selected !== null) openTo(selected);
+  }
+  readPalette();
+  renderTree();
+  setView(view);
 })();
 </script>
 </body>

@@ -59,12 +59,20 @@
 //! # The coverage grid
 //!
 //! `Config::coverage.html` (`CRABCHECK_COVERAGE_HTML=dir`) writes
-//! `<dir>/<property>.html`: a page with no external resources showing the
-//! tracked functions by module, how many inputs entered each, their source
-//! with the number of inputs that executed every line, the targets and the
-//! sampled inputs. Clicking a line number selects it (shift-click extends
-//! the selection); the panel on the right then shows the `targets.jsonl`
-//! line for the selection and a brief describing the target, its current
+//! `<dir>/<property>.html`: a page with no external resources over the
+//! tracked functions, how many inputs entered each, the number of inputs
+//! that executed every line, the targets and the sampled inputs. The
+//! functions form a hierarchy read from their demangled names (crate,
+//! modules, types, functions, closures under the function that owns them),
+//! or directories and files when grouped by file. Two views share it: the
+//! *map*, a treemap whose cells are sized by instrumented lines and coloured
+//! red through yellow to green by the share executed, zooming from the crate through modules to a
+//! function, whose lines stack in source order; and the *source* view, the
+//! function's code with per-line input and execution counts. Clicking a
+//! line (a strip in the map, a line number in the source) selects it and
+//! shift-click extends the selection; the panel on the right then shows
+//! the `targets.jsonl` line
+//! for the selection and a brief describing the target, its current
 //! coverage and what the generator produces, to hand to whoever rewrites
 //! the generator. Needs the `json` feature. With the `serve` feature,
 //! `crabcheck serve` shows these pages live and adds the selection to
