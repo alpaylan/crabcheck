@@ -761,10 +761,10 @@ expression: "serde_json::to_string_pretty(&report).expect(\"report serializes\")
   },
   "coverage": {
     "filter": "reports::planted",
-    "functions_reached": 1,
-    "functions_total": 1,
-    "counters_hit": 4,
-    "counters_total": 4,
+    "functions_reached": 2,
+    "functions_total": 2,
+    "counters_hit": 5,
+    "counters_total": 5,
     "inputs": 456,
     "novel_inputs": 3,
     "last_novelty_at": 5,
@@ -774,15 +774,15 @@ expression: "serde_json::to_string_pretty(&report).expect(\"report serializes\")
       "points": [
         [
           1,
-          2
-        ],
-        [
-          2,
           3
         ],
         [
-          6,
+          2,
           4
+        ],
+        [
+          6,
+          5
         ]
       ]
     },

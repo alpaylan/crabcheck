@@ -103,7 +103,7 @@ impl Grid {
         let property_fn = self
             .selected
             .iter()
-            .filter(|&&fi| is_property_fn(&all[fi].name, facts.property_type))
+            .filter(|&&fi| super::is_property_fn(&all[fi].name, facts.property_type))
             .max_by_key(|&&fi| {
                 (
                     all[fi].name.ends_with("::__crabcheck_property"),
@@ -212,21 +212,6 @@ impl Grid {
     }
 }
 
-/// Whether a tracked function is the property itself: the function named
-/// by its `type_name`, a closure of that path (`type_name` says
-/// `{{closure}}` without the index), or the body `#[crabcheck::test]`
-/// nests inside the test function.
-fn is_property_fn(name: &str, property_type: &str) -> bool {
-    let Some(prefix) = property_type.strip_suffix("::{{closure}}") else {
-        return name == property_type;
-    };
-    let Some(rest) = name.strip_prefix(prefix).and_then(|rest| rest.strip_prefix("::")) else {
-        return false;
-    };
-    rest == "__crabcheck_property"
-        || (rest.starts_with("{closure#") && rest.ends_with('}') && !rest.contains("::"))
-}
-
 /// The path of a function name: everything before its last `::`.
 fn module_of(name: &str) -> String {
     match name.rfind("::") {
@@ -269,21 +254,6 @@ fn file_stem(name: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn the_property_function_is_recognised() {
-        use super::is_property_fn;
-        let closure = "bst::main::{{closure}}";
-        assert!(is_property_fn("bst::main::{closure#4}", closure));
-        assert!(!is_property_fn("bst::main::{closure#4}::{closure#0}", closure));
-        assert!(!is_property_fn("bst::main", closure));
-        assert!(!is_property_fn("bst::main_2::{closure#0}", closure));
-        let test = "my_crate::tests::sorted::{{closure}}";
-        assert!(is_property_fn("my_crate::tests::sorted::__crabcheck_property", test));
-        assert!(is_property_fn("my_crate::tests::sorted::{closure#0}", test));
-        assert!(is_property_fn("my_crate::props::sorted", "my_crate::props::sorted"));
-        assert!(!is_property_fn("my_crate::props::sorted_by", "my_crate::props::sorted"));
-    }
-
     use super::*;
 
     #[test]

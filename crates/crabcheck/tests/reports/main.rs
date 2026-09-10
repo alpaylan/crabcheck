@@ -63,6 +63,11 @@ fn settings(paths: &[&Path]) -> insta::Settings {
     for path in paths {
         settings.add_filter(&regex_escape(&path.display().to_string()), "[dir]");
     }
+    // Suspects carry absolute paths; the workspace root is this machine's.
+    if let Some(root) = Path::new(env!("CARGO_MANIFEST_DIR")).ancestors().nth(2) {
+        settings
+            .add_filter(&format!("{}/", regex_escape(&root.display().to_string())), "[workspace]/");
+    }
     settings
 }
 

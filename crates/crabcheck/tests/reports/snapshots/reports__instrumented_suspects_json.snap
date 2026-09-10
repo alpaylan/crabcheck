@@ -98,10 +98,10 @@ expression: "serde_json::to_string_pretty(&report).expect(\"report serializes\")
   "target": null,
   "coverage": {
     "filter": "reports::planted",
-    "functions_reached": 1,
-    "functions_total": 1,
-    "counters_hit": 4,
-    "counters_total": 4,
+    "functions_reached": 2,
+    "functions_total": 2,
+    "counters_hit": 5,
+    "counters_total": 5,
     "inputs": 104,
     "novel_inputs": 3,
     "last_novelty_at": 63,
@@ -111,15 +111,15 @@ expression: "serde_json::to_string_pretty(&report).expect(\"report serializes\")
       "points": [
         [
           1,
-          2
-        ],
-        [
-          3,
           3
         ],
         [
-          64,
+          3,
           4
+        ],
+        [
+          64,
+          5
         ]
       ]
     },
@@ -132,7 +132,7 @@ expression: "serde_json::to_string_pretty(&report).expect(\"report serializes\")
     "suspects": [
       {
         "rank": 1,
-        "file": "/Users/akeles/Programming/projects/PbtBenchmark/crabcheck/crates/crabcheck/tests/reports/planted.rs",
+        "file": "[workspace]/crates/crabcheck/tests/reports/planted.rs",
         "function": "reports::planted::classify",
         "start_line": 5,
         "end_line": 15,

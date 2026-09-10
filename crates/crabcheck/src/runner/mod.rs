@@ -1006,7 +1006,18 @@ where
             settings.filter.clone()
         };
         let targets = self.resolve_targets();
-        let extra = targets.as_ref().map(|t| t.functions()).unwrap_or_default();
+        let mut extra = targets.as_ref().map(|t| t.functions()).unwrap_or_default();
+        // The property's own function is tracked whichever crate it lives
+        // in, so the grid can point at it; it stays out of fault
+        // localization, where it could only be noise.
+        let property_fns: Vec<usize> = crate::coverage::counters::Functions::get()
+            .all()
+            .iter()
+            .enumerate()
+            .filter(|(_, f)| crate::coverage::is_property_fn(&f.name, self.coverage.property_type))
+            .map(|(i, _)| i)
+            .collect();
+        extra.extend(property_fns.iter().copied());
         match crate::coverage::tracker::Tracker::new(&filter, &extra) {
             Some(tracker) => {
                 let guard = crate::coverage::lock();
@@ -1026,8 +1037,14 @@ where
                     self.report.warn("coverage_html", "the coverage grid needs the `json` feature");
                 }
                 if self.config.locate.enabled {
+                    let code_under_test: Vec<usize> = tracker
+                        .selected()
+                        .iter()
+                        .copied()
+                        .filter(|i| !property_fns.contains(i))
+                        .collect();
                     self.coverage.spectrum =
-                        crate::coverage::locate::Spectrum::new(tracker.selected());
+                        crate::coverage::locate::Spectrum::new(&code_under_test);
                     if self.coverage.spectrum.is_none() {
                         self.report.warn(
                             "locate_unavailable",

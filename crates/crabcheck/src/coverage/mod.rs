@@ -98,7 +98,7 @@
 //! every condition separately; nothing else changes. Use it when a bug hides
 //! in a condition that is evaluated on every run but decided differently.
 
-mod counters;
+pub(crate) mod counters;
 #[cfg(feature = "json")]
 pub(crate) mod grid;
 pub(crate) mod locate;
@@ -112,6 +112,22 @@ pub(crate) use locate::{
     display_path,
     lines_hit,
 };
+
+/// Whether a tracked function is the property itself: the function named
+/// by its `type_name`, a closure of that path (`type_name` says
+/// `{{closure}}` without the index), or the body `#[crabcheck::test]`
+/// nests inside the test function.
+pub(crate) fn is_property_fn(name: &str, property_type: &str) -> bool {
+    let Some(prefix) = property_type.strip_suffix("::{{closure}}") else {
+        return name == property_type;
+    };
+    let Some(rest) = name.strip_prefix(prefix).and_then(|rest| rest.strip_prefix("::")) else {
+        return false;
+    };
+    rest == "__crabcheck_property"
+        || (rest.starts_with("{closure#") && rest.ends_with('}') && !rest.contains("::"))
+}
+
 
 pub use {
     counters::{
@@ -136,3 +152,22 @@ pub use {
     targets::TargetOutcome,
     tracker::Summary,
 };
+
+#[cfg(test)]
+mod tests {
+    use super::is_property_fn;
+
+    #[test]
+    fn the_property_function_is_recognised() {
+        let closure = "bst::main::{{closure}}";
+        assert!(is_property_fn("bst::main::{closure#4}", closure));
+        assert!(!is_property_fn("bst::main::{closure#4}::{closure#0}", closure));
+        assert!(!is_property_fn("bst::main", closure));
+        assert!(!is_property_fn("bst::main_2::{closure#0}", closure));
+        let test = "my_crate::tests::sorted::{{closure}}";
+        assert!(is_property_fn("my_crate::tests::sorted::__crabcheck_property", test));
+        assert!(is_property_fn("my_crate::tests::sorted::{closure#0}", test));
+        assert!(is_property_fn("my_crate::props::sorted", "my_crate::props::sorted"));
+        assert!(!is_property_fn("my_crate::props::sorted_by", "my_crate::props::sorted"));
+    }
+}

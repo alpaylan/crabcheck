@@ -122,6 +122,9 @@ library verifies them and makes every failure reproducible from its seed.
   agent do it), run, see the outcome. Standard-library HTTP on 127.0.0.1
   only; cross-site requests are refused; the only thing it starts is
   `cargo`.
+- The property's own function (the closure passed to `check`, or the
+  body of a `#[crabcheck::test]`) is always tracked, whichever crate it
+  lives in, and the grid page pins it above the tree.
 - `Report.run` (`RunSpec`): which package, target kind (`test` or
   `example`), binary and test path produced the report, read from the
   environment cargo gives a running test, so a tool can run the same
