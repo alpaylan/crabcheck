@@ -4,8 +4,8 @@ use std::{
     collections::HashMap,
     ops::Range,
     sync::{
+        Condvar,
         Mutex,
-        MutexGuard,
         OnceLock,
     },
 };
@@ -16,13 +16,33 @@ pub fn available() -> bool {
     cfg!(crabcheck_instrumented)
 }
 
-static LOCK: Mutex<()> = Mutex::new(());
+static HELD: Mutex<bool> = Mutex::new(false);
+static FREED: Condvar = Condvar::new();
+
+/// Holds the process-wide coverage lock; dropping it releases the lock.
+/// Unlike a `MutexGuard` it may move between threads, so a [`Run`](crate::Run)
+/// can own one.
+#[derive(Debug)]
+pub struct Lease(());
+
+impl Drop for Lease {
+    fn drop(&mut self) {
+        let mut held = HELD.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        *held = false;
+        FREED.notify_one();
+    }
+}
 
 /// The process-wide lock coverage-using phases hold so that crabcheck's own
 /// runs do not pollute each other's deltas. Other test threads are not
 /// stopped by it; run with `RUST_TEST_THREADS=1` for exact attribution.
-pub fn lock() -> MutexGuard<'static, ()> {
-    LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+pub fn lock() -> Lease {
+    let mut held = HELD.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    while *held {
+        held = FREED.wait(held).unwrap_or_else(|poisoned| poisoned.into_inner());
+    }
+    *held = true;
+    Lease(())
 }
 
 /// The counter section (or a window of it) at one moment.

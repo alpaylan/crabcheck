@@ -120,6 +120,68 @@ Properties may return `bool`, `()`, `Result<_, E: Debug>` or `TestResult`;
 a panic is a failure with its message and location captured. `assume!`
 discards inputs that do not apply.
 
+## Writing your own loop
+
+`check` is a loop over public steps, and the steps are yours to arrange.
+A [`Run`] applies the configuration, owns the seed and the report, and
+offers `draw`, `test`, `keep`, `pool_pick`, `mutate` and `wants_more`;
+`finish` shrinks the first failure, localizes it, remembers it and writes
+the report. This is `check`'s random phase followed by a hill-climb with
+patience instead of the built-in targeted phase:
+
+```rust
+use crabcheck::{Config, Run, gens, target};
+
+let config = Config::default().seed(1).tests(300);
+let mut run = Run::new(&config, gens::vec(gens::int(0i32..=99)), |v: Vec<i32>| {
+    target(v.iter().filter(|&&x| x > 90).count() as f64);
+    v.len() <= 100
+});
+while run.wants_more() {
+    let Some(input) = run.draw() else { continue };
+    let tested = run.test(&input);
+    if tested.passed() {
+        run.keep(input.value, &tested);
+    }
+}
+let (mut best, mut stale) = (0.0f64, 0);
+while stale < 40 {
+    let Some(parent) = run.pool_pick() else { break };
+    let Some(child) = run.mutate(&parent) else { continue };
+    let tested = run.test(&child);
+    if tested.failed() { break; }
+    match tested.score() {
+        Some(score) if score > best => { best = score; stale = 0; run.keep_always(child.value, score); }
+        _ => stale += 1,
+    }
+}
+run.finish().assert_passed();
+```
+
+Every step draws its randomness from the run, so a loop replays by seed;
+inputs from `draw` also carry a replay point of their own, mutants are
+remembered by their rendering. See `examples/custom_loop.rs`.
+
+Shrinking is a step as well. `run.shrink()` runs the built-in driver on
+the failure whenever the loop likes, and `run.reproduces(&candidate)`
+asks the run's oracle whether a candidate fails the same way, so a
+shrinking strategy of your own is a loop over candidates ending in
+`run.shrunk_to(minimal)`:
+
+```rust
+let mut current = run.failure().unwrap().clone();
+'outer: loop {
+    for candidate in run.generator().shrink(&current) {
+        if run.reproduces(&candidate) { current = candidate; continue 'outer; }
+    }
+    break;
+}
+run.shrunk_to(current);
+```
+
+`finish` reports whatever the loop settled on, and only shrinks itself
+when the loop did nothing.
+
 ## Reproducing and steering runs
 
 | Variable | Effect |

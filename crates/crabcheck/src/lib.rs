@@ -139,9 +139,13 @@ pub use {
         TargetSummary,
     },
     runner::{
+        Input,
         Outcome,
+        Run,
         TestResult,
         Testable,
+        Tested,
+        Verdict,
         check,
         check_par,
         labels::{

@@ -1,0 +1,18 @@
+---
+source: crates/crabcheck/tests/reports/main.rs
+expression: text
+---
+exit: 0
+--- stdout ---
+crabcheck: ok, 340 tests passed (193 distinct, 0 discarded) in [time], seed 7
+  target: best score 1 reached by [67, 56] (40 mutated inputs, 1 improvements)
+  feature target: 150 values, min 0, median 0.536, p90 1, max 1
+    histogram: 0-0.125 23%, 0.125-0.250 4%, 0.250-0.375 9%, 0.375-0.500 12%, 0.500-0.625 11%, 0.625-0.750 16%, 0.750-0.875 4%, 0.875-1 21%
+  timing: property median [time], p90 [time], max [time]; generation median [time], p90 [time], max [time]
+    slowest input: [input]
+  sample (random, iteration 0, size 0): []
+  sample (random, iteration 15, size 12): [45, 70, 28, 15, 8, 46, 6, 0, 58, 68, 42]
+  sample (random, iteration 74, size 12): [88, 51, 46, 46, 88, 24, 23, 94, 46, 88, 71]
+  sample (random, iteration 140, size 3): [60]
+  sample (random, iteration 86, size 0): []
+--- stderr ---

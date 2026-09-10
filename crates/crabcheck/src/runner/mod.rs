@@ -49,6 +49,7 @@ use crate::{
         Location,
         ReplayOutcome,
         Report,
+        ShrinkStats,
         Status,
         TargetSummary,
     },
@@ -97,89 +98,12 @@ where
     R: Testable,
     P: FnMut(G::Value) -> R,
 {
-    let (config, problems) = config.clone().apply_env_vars(std::env::vars());
-    let seed = config.seed.unwrap_or_else(random_seed);
-    let mut run = Run::new(&config, &generator, property, seed, property_name(&config));
-    run.report.run = crate::report::RunSpec::current();
-    for problem in problems {
-        run.report.warn("config_env", problem);
+    let mut run = Run::new(config, generator, property);
+    if run.remembered() {
+        return run.finish();
     }
-    let _coverage_guard = run.enable_coverage();
-    #[cfg(not(feature = "json"))]
-    if config.report.observations.is_some() {
-        run.report.warn("observations", "observation files need the `json` feature");
-    }
-
-    if let Some(point) = config.replay {
-        let attempt = run.run_point(point, crate::report::Origin::Replay);
-        let reproduced = matches!(attempt, Attempt::Failed { .. });
-        run.report.replay = Some(ReplayOutcome { point, reproduced });
-        if let Attempt::Failed { size, result } = attempt
-            && let Some(value) = run.regenerate(point)
-        {
-            run.fail(
-                Found { value, point: Some(point), size, iteration: point.iteration, result },
-                None,
-            );
-            return run.finish();
-        }
-    }
-
-    #[cfg(feature = "json")]
-    if config.regressions.replay {
-        let entries = crate::regressions::load(&config.regressions.dir, &run.name);
-        if !entries.is_empty() {
-            run.report.regressions.file =
-                Some(crate::regressions::path_for(&config.regressions.dir, &run.name));
-        }
-        for entry in entries {
-            let point = ReplayPoint { seed: entry.seed, iteration: entry.iteration };
-            run.report.regressions.replayed += 1;
-            let Some(value) = run.regenerate(point) else {
-                run.report.regressions.stale += 1;
-                run.report.warn("regressions", format!("stored input {point} could not be regenerated (discarded or the generator panicked)"));
-                continue;
-            };
-            let (debug, _, _) = render(&value, config.report.truncate_debug_at);
-            if debug != entry.debug {
-                run.report.regressions.stale += 1;
-                run.report.warn(
-                    "regressions",
-                    format!(
-                        "stored input {point} no longer matches the generator (stored {}, regenerated {debug}); \
-                         delete the entry or rerun the property",
-                        entry.debug
-                    ),
-                );
-                continue;
-            }
-            let size = size_for(point.seed, point.iteration, config.max_size);
-            let (result, observed, elapsed) = run.evaluate(value.clone());
-            run.observe(ObservationLine {
-                origin: "regression",
-                seed: point.seed,
-                iteration: point.iteration,
-                size,
-                representation: debug.clone(),
-                result: &result,
-                observed: Some(&observed),
-                generate: std::time::Duration::ZERO,
-                execute: elapsed,
-                coverage: None,
-            });
-            if Signature::of(&result).is_some() {
-                run.fail(
-                    Found { value, point: Some(point), size, iteration: point.iteration, result },
-                    None,
-                );
-                return run.finish();
-            }
-        }
-    }
-
-    if let Some(found) = run.random_search(None) {
-        run.fail(found, None);
-    } else if run.report.status == Status::Passed {
+    run.random_search(None);
+    if run.pending.is_none() && run.report.status == Status::Passed {
         run.targeted_search();
     }
     run.finish()
@@ -236,7 +160,8 @@ where
     }
 
     let seed = config.seed.unwrap_or_else(random_seed);
-    let mut run = Run::new(&config, &generator, &property, seed, property_name(&config));
+    let name = property_name(&config);
+    let mut run = Run::with_seed(config.clone(), ByRef(&generator), &property, seed, name);
     run.report.run = crate::report::RunSpec::current();
     run.report.threads = threads;
     for problem in problems {
@@ -256,8 +181,7 @@ where
     let property_ref = &property;
     let started = run.started;
 
-    #[allow(clippy::type_complexity)]
-    let outcomes: Vec<(Run<'_, G, &P>, Option<Found<G::Value>>)> = std::thread::scope(|scope| {
+    let workers: Vec<Run<ByRef<'_, G>, &P>> = std::thread::scope(|scope| {
         let handles: Vec<_> = worker_configs
             .iter()
             .enumerate()
@@ -265,19 +189,19 @@ where
                 let stop = &stop;
                 scope.spawn(move || {
                     let worker_seed = mix(seed, u64::MAX - 2 - index as u64);
-                    let mut worker = Run::new(
-                        worker_config,
-                        generator_ref,
+                    let mut worker = Run::with_seed(
+                        worker_config.clone(),
+                        ByRef(generator_ref),
                         property_ref,
                         worker_seed,
                         String::new(),
                     );
                     worker.started = started;
-                    let found = worker.random_search(Some(stop));
-                    if found.is_some() {
+                    worker.random_search(Some(stop));
+                    if worker.pending.is_some() {
                         stop.store(true, Ordering::Relaxed);
                     }
-                    (worker, found)
+                    worker
                 })
             })
             .collect();
@@ -288,9 +212,10 @@ where
     });
 
     let mut failure: Option<(usize, Found<G::Value>)> = None;
-    for (index, (worker, found)) in outcomes.into_iter().enumerate() {
+    for (index, mut worker) in workers.into_iter().enumerate() {
+        let found = worker.pending.take();
         run.absorb(worker);
-        if let Some(found) = found
+        if let Some((found, _)) = found
             && failure.is_none()
         {
             failure = Some((index, found));
@@ -299,11 +224,30 @@ where
     if let Some((thread, found)) = failure {
         run.report.status = Status::Passed;
         run.report.abort = None;
-        run.fail(found, Some(thread));
+        run.pending = Some((found, Some(thread)));
     } else if run.report.status == Status::Passed {
         run.targeted_search();
     }
     run.finish()
+}
+
+/// A generator borrowed by the workers of [`check_par`].
+struct ByRef<'a, G>(&'a G);
+
+impl<G: Gen> Gen for ByRef<'_, G> {
+    type Value = G::Value;
+
+    fn generate(&self, g: &mut Source) -> Self::Value {
+        self.0.generate(g)
+    }
+
+    fn shrink(&self, value: &Self::Value) -> Vec<Self::Value> {
+        self.0.shrink(value)
+    }
+
+    fn mutate(&self, value: &Self::Value, g: &mut Source) -> Option<Self::Value> {
+        self.0.mutate(value, g)
+    }
 }
 
 /// Per-run coverage state: the tracker, the fault-localization spectrum and
@@ -447,9 +391,50 @@ fn property_name(config: &Config) -> String {
         .unwrap_or_else(|| "unnamed".to_string())
 }
 
-struct Run<'a, G: Gen, P> {
-    config: &'a Config,
-    generator: &'a G,
+/// One property-based test as a sequence of steps, for testing loops
+/// written by hand. [`check`] is this loop:
+///
+/// ```
+/// use crabcheck::{Config, Run, gens};
+///
+/// let config = Config::default().seed(1).tests(200);
+/// let mut run = Run::new(&config, gens::vec(gens::int(-100i32..=100)), |v: Vec<i32>| {
+///     v.iter().map(|&x| i64::from(x)).sum::<i64>().abs() < 1_000_000
+/// });
+/// while run.wants_more() {
+///     let Some(input) = run.draw() else { continue };
+///     let tested = run.test(&input);
+///     if tested.passed() {
+///         run.keep(input.value, &tested);
+///     }
+/// }
+/// let report = run.finish();
+/// report.assert_passed();
+/// ```
+///
+/// [`new`](Self::new) applies the environment overrides, chooses the seed
+/// and starts coverage collection when configured. [`draw`](Self::draw)
+/// makes a random input, [`mutate`](Self::mutate) a variant of one, and
+/// [`test`](Self::test) runs the property on any input, recording the
+/// verdict, labels, features, timing and coverage in the report. Passing
+/// inputs may be [kept](Self::keep) as seeds for mutation and taken back
+/// with [`pool_pick`](Self::pool_pick). [`wants_more`](Self::wants_more)
+/// applies the stopping rules (the number of tests, the time budget, the
+/// timeout, the discard limit, and a failure). Shrinking is a step too:
+/// [`shrink`](Self::shrink) runs the built-in driver on the failure
+/// whenever the loop likes, or [`reproduces`](Self::reproduces) and
+/// [`shrunk_to`](Self::shrunk_to) let the loop drive its own.
+/// [`finish`](Self::finish) shrinks the first failure if nothing did,
+/// localizes it, remembers it and writes the report, its files and its
+/// pages.
+///
+/// A loop is reproducible by seed: all randomness comes from the run, so
+/// the same seed replays the same run. Inputs from `draw` also carry a
+/// [replay point](Input::replay) that regenerates them alone; mutants do
+/// not, so a failure found by mutation is remembered by its rendering.
+pub struct Run<G: Gen, P> {
+    config: Config,
+    generator: G,
     property: P,
     report: Report,
     seed: u64,
@@ -470,6 +455,19 @@ struct Run<'a, G: Gen, P> {
     observations: Option<Observations>,
     /// Generation time of the latest input, for its observation line.
     last_gen: std::time::Duration,
+    /// The targeted phase's choices: explore or mutate, and which seed.
+    rng: ChaCha8Rng,
+    /// The first failure, shrunk and reported by [`finish`](Self::finish),
+    /// with the worker thread that found it.
+    pending: Option<(Found<G::Value>, Option<usize>)>,
+    /// Mutations made through [`mutate`](Self::mutate), for the target
+    /// summary of hand-written loops.
+    mutations: u64,
+    /// The pending failure's shrinking, once it was reproduced.
+    shrinking: Option<Shrinking<G::Value>>,
+    /// Held while coverage is collected, so runs do not interleave.
+    #[cfg(feature = "coverage")]
+    lease: Option<crate::coverage::Lease>,
 }
 
 /// One evaluated input, as recorded in the observation file.
@@ -760,61 +758,229 @@ struct Found<T> {
     result: Result<Outcome, PanicInfo>,
 }
 
-enum Attempt {
-    Passed {
-        size: usize,
-        /// Debug hash of the input.
-        hash: u64,
-        observed: labels::Observed,
-        novel: bool,
-    },
-    Discarded(String),
-    Failed {
-        size: usize,
-        result: Result<Outcome, PanicInfo>,
-    },
-    GenPanicked(PanicInfo),
+/// The pending failure's shrinking: what it fails like, the smallest input
+/// known to fail the same way, and the steps taken so far.
+struct Shrinking<T> {
+    signature: Signature,
+    /// The failure did not reproduce when rerun; nothing is shrunk.
+    flaky: bool,
+    minimal: T,
+    /// The message and location of the failure `minimal` produced, once a
+    /// candidate was accepted.
+    failure: shrink::SameFailure,
+    stats: ShrinkStats,
+    /// The built-in driver ran, or the loop supplied its own result.
+    done: bool,
+    started: Option<Instant>,
 }
 
-impl<'a, G, R, P> Run<'a, G, P>
+/// Run the property on a shrink candidate and say whether it failed like
+/// the original (with the failure's message and location); the candidate
+/// is recorded in the observation file. Returns the time it took.
+#[allow(clippy::too_many_arguments)]
+fn try_candidate<T: Debug, R: Testable, P: FnMut(T) -> R>(
+    property: &mut P,
+    coverage: &mut CoverageState,
+    observations: &mut Option<Observations>,
+    seed: u64,
+    iteration: u64,
+    size: usize,
+    signature: &Signature,
+    candidate: T,
+) -> (shrink::SameFailure, std::time::Duration) {
+    let observing = observations.is_some();
+    let representation = if observing { render(&candidate, usize::MAX).0 } else { String::new() };
+    let before = coverage.begin();
+    let ran = Instant::now();
+    let (outcome, observed) = evaluate(property, candidate);
+    let elapsed = ran.elapsed();
+    let covered = coverage.end(before, &outcome, observing);
+    if let Some(observations) = observations.as_mut() {
+        observations.record(ObservationLine {
+            origin: "shrink",
+            seed,
+            iteration,
+            size,
+            representation,
+            result: &outcome,
+            observed: Some(&observed),
+            generate: std::time::Duration::ZERO,
+            execute: elapsed,
+            coverage: covered.lines,
+        });
+    }
+    let same = (Signature::of(&outcome).as_ref() == Some(signature)).then(|| {
+        let (_, message, location) = details(outcome);
+        (message, location)
+    });
+    (same, elapsed)
+}
+
+/// Why an input could not be generated.
+enum Skipped {
+    Discarded(String),
+    Panicked(PanicInfo),
+}
+
+/// An input drawn or mutated by a [`Run`], ready to be tested.
+#[derive(Clone, Debug)]
+pub struct Input<T> {
+    /// The value.
+    pub value: T,
+    point: Option<ReplayPoint>,
+    size: usize,
+    iteration: u64,
+    origin: crate::report::Origin,
+    generate: std::time::Duration,
+}
+
+impl<T> Input<T> {
+    /// The size the generator was asked for.
+    pub fn size(&self) -> usize {
+        self.size
+    }
+
+    /// The run's iteration that produced it.
+    pub fn iteration(&self) -> u64 {
+        self.iteration
+    }
+
+    /// Where it regenerates from, for inputs from [`Run::draw`]; mutants
+    /// have none.
+    pub fn replay(&self) -> Option<ReplayPoint> {
+        self.point
+    }
+
+    /// How it came to be.
+    pub fn origin(&self) -> crate::report::Origin {
+        self.origin
+    }
+}
+
+/// The three ways testing one input can end.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Verdict {
+    /// The property held.
+    Passed,
+    /// The property discarded the input.
+    Discarded,
+    /// The property failed; the run keeps the first such input for
+    /// [`Run::finish`].
+    Failed,
+}
+
+/// What one test of an input showed.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Tested {
+    verdict: Verdict,
+    novel: bool,
+    score: Option<f64>,
+}
+
+impl Tested {
+    /// How the test ended.
+    pub fn verdict(&self) -> Verdict {
+        self.verdict
+    }
+
+    /// Whether the property held.
+    pub fn passed(&self) -> bool {
+        self.verdict == Verdict::Passed
+    }
+
+    /// Whether the property discarded the input.
+    pub fn discarded(&self) -> bool {
+        self.verdict == Verdict::Discarded
+    }
+
+    /// Whether the property failed.
+    pub fn failed(&self) -> bool {
+        self.verdict == Verdict::Failed
+    }
+
+    /// Whether the input executed code no earlier input had (coverage on,
+    /// instrumented build); otherwise always false.
+    pub fn novel(&self) -> bool {
+        self.novel
+    }
+
+    /// The score the property reported through [`target`](crate::target),
+    /// for passing inputs.
+    pub fn score(&self) -> Option<f64> {
+        self.score
+    }
+}
+
+impl<G, R, P> Run<G, P>
 where
     G: Gen,
     G::Value: Clone + Debug,
     R: Testable,
     P: FnMut(G::Value) -> R,
 {
-    fn new(config: &'a Config, generator: &'a G, property: P, seed: u64, name: String) -> Self {
+    /// Set up a run: the environment overrides applied on top of `config`,
+    /// the seed chosen (or taken from the config), coverage collection
+    /// started when configured and the binary is instrumented, and the
+    /// report begun.
+    pub fn new(config: &Config, generator: G, property: P) -> Self {
+        let (config, problems) = config.clone().apply_env_vars(std::env::vars());
+        let seed = config.seed.unwrap_or_else(random_seed);
+        let name = property_name(&config);
+        let mut run = Run::with_seed(config, generator, property, seed, name);
+        run.report.run = crate::report::RunSpec::current();
+        for problem in problems {
+            run.report.warn("config_env", problem);
+        }
+        #[cfg(feature = "coverage")]
+        {
+            run.lease = run.enable_coverage();
+        }
+        #[cfg(not(feature = "coverage"))]
+        run.enable_coverage();
+        #[cfg(not(feature = "json"))]
+        if run.config.report.observations.is_some() {
+            run.report.warn("observations", "observation files need the `json` feature");
+        }
+        run
+    }
+
+    fn with_seed(config: Config, generator: G, property: P, seed: u64, name: String) -> Self {
+        let report = Report { name: name.clone(), ..Report::new(seed, config.max_size) };
+        let pool = Pool::new(config.target.pool_size, config.target.energy);
+        let stats = Stats::new(config.report.samples);
         #[cfg(feature = "json")]
-        let name_for_observations = name.clone();
+        let observations =
+            config.report.observations.as_ref().map(|_| Observations::new(name.clone()));
+        #[cfg(not(feature = "json"))]
+        let observations = None;
         Run {
             config,
             generator,
             property,
-            report: Report { name: name.clone(), ..Report::new(seed, config.max_size) },
+            report,
             seed,
             name,
             started: Instant::now(),
             seen: HashSet::new(),
             generated: 0,
-            pool: Pool::new(config.target.pool_size, config.target.energy),
+            pool,
             coverage: CoverageState::new(),
             covers: BTreeMap::new(),
-            stats: Stats::new(config.report.samples),
-            #[cfg(feature = "json")]
-            observations: config
-                .report
-                .observations
-                .as_ref()
-                .map(|_| Observations::new(name_for_observations)),
-            #[cfg(not(feature = "json"))]
-            observations: None,
+            stats,
+            observations,
             last_gen: std::time::Duration::ZERO,
             saw_score: false,
+            rng: ChaCha8Rng::seed_from_u64(mix(seed, u64::MAX - 1)),
+            pending: None,
+            mutations: 0,
+            shrinking: None,
+            #[cfg(feature = "coverage")]
+            lease: None,
         }
     }
 
     /// Generate the input at `point`. Accumulates generation time.
-    fn generate(&mut self, point: ReplayPoint) -> Result<(G::Value, usize), Attempt> {
+    fn generate(&mut self, point: ReplayPoint) -> Result<(G::Value, usize), Skipped> {
         let size = size_for(point.seed, point.iteration, self.config.max_size);
         let mut source = Source::new(mix(point.seed, point.iteration), size)
             .with_filter_max_attempts(self.config.filter_max_attempts);
@@ -825,9 +991,9 @@ where
         self.stats.gen_micros.push(micros(elapsed));
         self.last_gen = elapsed;
         match generated {
-            Err(info) => Err(Attempt::GenPanicked(info)),
+            Err(info) => Err(Skipped::Panicked(info)),
             Ok(_) if source.discarded().is_some() => {
-                Err(Attempt::Discarded(source.discarded().unwrap_or_default().to_string()))
+                Err(Skipped::Discarded(source.discarded().unwrap_or_default().to_string()))
             },
             Ok(value) => Ok((value, size)),
         }
@@ -865,60 +1031,168 @@ where
         }
     }
 
-    /// Generate the input at `point` and run the property on it. Counts
-    /// nothing; callers decide what the attempt means.
-    fn run_point(&mut self, point: ReplayPoint, origin: crate::report::Origin) -> Attempt {
-        let observing = self.observations.is_some();
-        let (value, size) = match self.generate(point) {
-            Ok(generated) => generated,
-            Err(attempt) => {
-                if let Attempt::Discarded(reason) = &attempt
-                    && observing
-                {
-                    let result = Ok(Outcome::Discard(reason.clone()));
-                    self.observe(ObservationLine {
-                        origin: origin.as_str(),
-                        seed: point.seed,
-                        iteration: point.iteration,
-                        size: size_for(point.seed, point.iteration, self.config.max_size),
-                        representation: String::new(),
-                        result: &result,
-                        observed: None,
-                        generate: self.last_gen,
-                        execute: std::time::Duration::ZERO,
-                        coverage: None,
-                    });
-                }
-                return attempt;
+    fn next_iteration(&mut self) -> u64 {
+        let iteration = self.report.iterations;
+        self.report.iterations += 1;
+        iteration
+    }
+
+    /// The observation line of an input the generator discarded.
+    fn observe_generation_discard(
+        &mut self,
+        point: ReplayPoint,
+        origin: crate::report::Origin,
+        reason: &str,
+    ) {
+        if self.observations.is_none() {
+            return;
+        }
+        let result = Ok(Outcome::Discard(reason.to_string()));
+        self.observe(ObservationLine {
+            origin: origin.as_str(),
+            seed: point.seed,
+            iteration: point.iteration,
+            size: size_for(point.seed, point.iteration, self.config.max_size),
+            representation: String::new(),
+            result: &result,
+            observed: None,
+            generate: self.last_gen,
+            execute: std::time::Duration::ZERO,
+            coverage: None,
+        });
+    }
+
+    /// Draw the input at `point`. A discard by the generator is counted
+    /// and a generator panic aborts the run; both yield `None`.
+    fn draw_at(
+        &mut self,
+        point: ReplayPoint,
+        origin: crate::report::Origin,
+    ) -> Option<Input<G::Value>> {
+        match self.generate(point) {
+            Ok((value, size)) => {
+                Some(Input {
+                    value,
+                    point: Some(point),
+                    size,
+                    iteration: point.iteration,
+                    origin,
+                    generate: self.last_gen,
+                })
             },
-        };
+            Err(Skipped::Discarded(reason)) => {
+                self.observe_generation_discard(point, origin, &reason);
+                self.record_discard(reason);
+                None
+            },
+            Err(Skipped::Panicked(info)) => {
+                self.report.status = Status::Aborted;
+                self.report.abort = Some(Abort {
+                    message: info.message,
+                    location: info.location,
+                    iteration: point.iteration,
+                });
+                None
+            },
+        }
+    }
+
+    /// Draw the next random input, at a size sampled for this iteration.
+    /// `None` when the generator discarded it (counted toward the discard
+    /// limit) or panicked (the run aborts; see [`wants_more`](Self::wants_more)).
+    pub fn draw(&mut self) -> Option<Input<G::Value>> {
+        let iteration = self.next_iteration();
+        self.draw_at(ReplayPoint { seed: self.seed, iteration }, crate::report::Origin::Random)
+    }
+
+    /// Run the property on `input`. A pass counts toward the run's tests
+    /// and records the input's labels, features, timing and coverage; a
+    /// discard counts toward the discard limit; the first failure is kept
+    /// for [`finish`](Self::finish) to shrink and report, and later ones
+    /// are only counted.
+    pub fn test(&mut self, input: &Input<G::Value>) -> Tested {
+        let (tested, result) = self.test_input(input, true);
+        if tested.failed() && self.pending.is_none() {
+            self.pending = Some((
+                Found {
+                    value: input.value.clone(),
+                    point: input.point,
+                    size: input.size,
+                    iteration: input.iteration,
+                    result,
+                },
+                None,
+            ));
+        }
+        tested
+    }
+
+    /// Test `input`, counting passes and discards when `record`. Returns
+    /// the raw result alongside the verdict for callers that keep failures
+    /// themselves.
+    fn test_input(
+        &mut self,
+        input: &Input<G::Value>,
+        record: bool,
+    ) -> (Tested, Result<Outcome, PanicInfo>) {
+        let observing = self.observations.is_some();
         self.generated += 1;
-        let hash = debug_hash(&value);
+        let hash = debug_hash(&input.value);
         self.note_distinct(hash);
-        let representation = if observing { render(&value, usize::MAX).0 } else { String::new() };
+        let representation =
+            if observing { render(&input.value, usize::MAX).0 } else { String::new() };
         let before = self.coverage.begin();
-        let (result, observed, elapsed) = self.evaluate(value);
+        let (result, observed, elapsed) = self.evaluate(input.value.clone());
         let covered = self.coverage.end(before, &result, observing);
         let novel = covered.novel;
-        self.stats.slower(elapsed, || Provenance::Point(point));
+        let limit = self.config.report.truncate_debug_at;
+        let (value, point) = (&input.value, input.point);
+        let provenance = || {
+            match point {
+                Some(point) => Provenance::Point(point),
+                None => Provenance::Debug(render(value, limit).0),
+            }
+        };
+        self.stats.slower(elapsed, provenance);
         if observing {
             self.observe(ObservationLine {
-                origin: origin.as_str(),
-                seed: point.seed,
-                iteration: point.iteration,
-                size,
+                origin: input.origin.as_str(),
+                seed: point.map_or(self.seed, |p| p.seed),
+                iteration: input.iteration,
+                size: input.size,
                 representation,
                 result: &result,
                 observed: Some(&observed),
-                generate: self.last_gen,
+                generate: input.generate,
                 execute: elapsed,
                 coverage: covered.lines,
             });
         }
+        let score = observed.score;
         match result {
-            Ok(Outcome::Pass) => Attempt::Passed { size, hash, observed, novel },
-            Ok(Outcome::Discard(reason)) => Attempt::Discarded(reason),
-            result => Attempt::Failed { size, result },
+            Ok(Outcome::Pass) => {
+                if record {
+                    self.record_pass(
+                        input.size,
+                        hash,
+                        observed,
+                        input.origin,
+                        input.iteration,
+                        provenance,
+                    );
+                }
+                (Tested { verdict: Verdict::Passed, novel, score }, Ok(Outcome::Pass))
+            },
+            Ok(Outcome::Discard(reason)) => {
+                if record {
+                    self.record_discard(reason.clone());
+                }
+                (
+                    Tested { verdict: Verdict::Discarded, novel, score: None },
+                    Ok(Outcome::Discard(reason)),
+                )
+            },
+            result => (Tested { verdict: Verdict::Failed, novel, score: None }, result),
         }
     }
 
@@ -981,7 +1255,7 @@ where
     #[cfg(feature = "coverage")]
     /// Start collecting coverage if configured and available. Returns the
     /// process-wide coverage lock, which the caller holds for the run.
-    fn enable_coverage(&mut self) -> Option<std::sync::MutexGuard<'static, ()>> {
+    fn enable_coverage(&mut self) -> Option<crate::coverage::Lease> {
         let settings = &self.config.coverage;
         if !settings.enabled {
             return None;
@@ -1080,12 +1354,11 @@ where
     /// The configured coverage targets (inline and from the file), resolved.
     #[cfg(feature = "coverage")]
     fn resolve_targets(&mut self) -> Option<crate::coverage::targets::Targets> {
-        let config = self.config;
         #[cfg_attr(not(feature = "json"), allow(unused_mut))]
-        let mut targets = config.coverage.targets.clone();
-        if let Some(path) = &config.coverage.targets_file {
+        let mut targets = self.config.coverage.targets.clone();
+        if let Some(path) = self.config.coverage.targets_file.clone() {
             #[cfg(feature = "json")]
-            match crate::config::load_targets(path) {
+            match crate::config::load_targets(&path) {
                 Ok(more) => targets.extend(more),
                 Err(e) => {
                     self.report
@@ -1131,86 +1404,447 @@ where
     }
 
 
-    /// The random-testing loop. Returns the first failing input, which the
-    /// caller hands to [`fail`](Self::fail). `stop` lets parallel workers
-    /// end early once another worker has found a failure.
-    fn random_search(&mut self, stop: Option<&AtomicBool>) -> Option<Found<G::Value>> {
-        let config = self.config;
-        let max_discards = (config.max_discard_ratio * config.tests as f64).max(0.0) as u64;
-        let budget = config.budget_ms.map(std::time::Duration::from_millis);
-
-        while self.report.tests < config.tests {
-            if stop.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
-                return None;
-            }
-            if let Some(budget) = budget
-                && self.started.elapsed() > budget
-            {
-                self.report.stopped_by_budget = true;
-                return None;
-            }
-            if let Some(timeout) = config.timeout_duration()
-                && self.started.elapsed() > timeout
-            {
-                self.report.status = Status::TimedOut;
-                return None;
-            }
-            if self.report.discarded > max_discards {
-                self.report.status = Status::GaveUp;
-                return None;
-            }
-
-            let iteration = self.report.iterations;
-            self.report.iterations += 1;
-            let point = ReplayPoint { seed: self.seed, iteration };
-            match self.run_point(point, crate::report::Origin::Random) {
-                Attempt::GenPanicked(info) => {
-                    self.report.status = Status::Aborted;
-                    self.report.abort =
-                        Some(Abort { message: info.message, location: info.location, iteration });
-                    return None;
-                },
-                Attempt::Discarded(reason) => self.record_discard(reason),
-                Attempt::Passed { size, hash, observed, novel } => {
-                    let score = observed.score;
-                    self.record_pass(
-                        size,
-                        hash,
-                        observed,
-                        crate::report::Origin::Random,
-                        iteration,
-                        || Provenance::Point(point),
-                    );
-                    self.keep_if_interesting(point, score, novel);
-                },
-                Attempt::Failed { size, result } => {
-                    let value = self.regenerate(point)?;
-                    return Some(Found { value, point: Some(point), size, iteration, result });
-                },
-            }
+    /// Whether the run still wants inputs: none of the stopping rules has
+    /// fired. The rules, in order: the number of tests reached
+    /// [`Config::tests`]; the time budget ([`Config::budget_ms`]) ran out;
+    /// the timeout ([`Config::timeout_ms`]) elapsed; more inputs were
+    /// discarded than [`Config::max_discard_ratio`] allows; the property
+    /// failed, or the generator panicked. A rule that fired is reflected in
+    /// the report.
+    pub fn wants_more(&mut self) -> bool {
+        if self.pending.is_some() || self.report.status != Status::Passed {
+            return false;
         }
-        None
+        if self.report.tests >= self.config.tests {
+            return false;
+        }
+        if let Some(budget) = self.config.budget_ms.map(std::time::Duration::from_millis)
+            && self.started.elapsed() > budget
+        {
+            self.report.stopped_by_budget = true;
+            return false;
+        }
+        if let Some(timeout) = self.config.timeout_duration()
+            && self.started.elapsed() > timeout
+        {
+            self.report.status = Status::TimedOut;
+            return false;
+        }
+        let max_discards =
+            (self.config.max_discard_ratio * self.config.tests as f64).max(0.0) as u64;
+        if self.report.discarded > max_discards {
+            self.report.status = Status::GaveUp;
+            return false;
+        }
+        true
     }
 
-    /// Keep a passing input as a targeted-phase seed when its score improves
-    /// the pool, or when guided search is on and it reached new coverage.
-    fn keep_if_interesting(&mut self, point: ReplayPoint, score: Option<f64>, novel: bool) {
-        let guided = self.guided();
-        let by_score = score.is_some_and(|s| self.pool.improves(s));
-        if !(by_score || (novel && guided)) {
-            return;
-        }
-        if let Some(value) = self.regenerate(point) {
-            if by_score {
-                self.pool.add(value, score.unwrap_or(0.0));
-            } else {
-                self.pool.add_forced(value, score.unwrap_or(0.0));
+    /// The random phase: draw, test, keep, until a stopping rule fires.
+    /// `stop` lets parallel workers end early once another found a failure.
+    fn random_search(&mut self, stop: Option<&AtomicBool>) {
+        while self.wants_more() {
+            if stop.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
+                return;
+            }
+            let iteration = self.next_iteration();
+            let point = ReplayPoint { seed: self.seed, iteration };
+            let Some(input) = self.draw_at(point, crate::report::Origin::Random) else {
+                continue;
+            };
+            let tested = self.test(&input);
+            if tested.passed() {
+                self.keep(input.value, &tested);
             }
         }
+    }
+
+    /// Keep a passing input as a seed for mutation when its score improves
+    /// the pool, or when guided search is on and it reached new coverage.
+    /// Returns whether it was kept.
+    pub fn keep(&mut self, value: G::Value, tested: &Tested) -> bool {
+        if !tested.passed() {
+            return false;
+        }
+        let guided = self.guided();
+        let by_score = tested.score.is_some_and(|s| self.pool.improves(s));
+        if by_score {
+            self.pool.add(value, tested.score.unwrap_or(0.0));
+            true
+        } else if tested.novel && guided {
+            self.pool.add_forced(value, tested.score.unwrap_or(0.0));
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Keep an input as a seed with `score`, whatever the pool's threshold.
+    pub fn keep_always(&mut self, value: G::Value, score: f64) {
+        self.pool.add_forced(value, score);
+    }
+
+    /// Whether the pool holds seeds to mutate.
+    pub fn has_seeds(&self) -> bool {
+        !self.pool.is_empty()
+    }
+
+    /// Pick a seed to mutate, weighted by score; each seed has a budget of
+    /// picks. `None` when the pool is empty or every budget is spent.
+    pub fn pool_pick(&mut self) -> Option<G::Value> {
+        self.pool.pick(&mut self.rng).map(|seed| seed.value)
+    }
+
+    /// A variant of `parent` from the generator's mutator, at a size
+    /// sampled for this iteration. `None` when the mutator has nothing to
+    /// offer or panicked (the run aborts).
+    pub fn mutate(&mut self, parent: &G::Value) -> Option<Input<G::Value>> {
+        let iteration = self.next_iteration();
+        self.mutations += 1;
+        self.mutate_at(parent, iteration)
+    }
+
+    fn mutate_at(&mut self, parent: &G::Value, iteration: u64) -> Option<Input<G::Value>> {
+        let size = size_for(self.seed, iteration, self.config.max_size);
+        let mut source = Source::new(mix(self.seed, iteration), size)
+            .with_filter_max_attempts(self.config.filter_max_attempts);
+        let started = Instant::now();
+        match panic::catch(|| self.generator.mutate(parent, &mut source)) {
+            Ok(Some(value)) => {
+                Some(Input {
+                    value,
+                    point: None,
+                    size,
+                    iteration,
+                    origin: crate::report::Origin::Mutation,
+                    generate: started.elapsed(),
+                })
+            },
+            Ok(None) => None,
+            Err(info) => {
+                self.report.status = Status::Aborted;
+                self.report.abort =
+                    Some(Abort { message: info.message, location: info.location, iteration });
+                None
+            },
+        }
+    }
+
+    /// The generator, for loops that shrink or mutate by hand.
+    pub fn generator(&self) -> &G {
+        &self.generator
+    }
+
+    /// The failing input kept by [`test`](Self::test), as found.
+    pub fn failure(&self) -> Option<&G::Value> {
+        self.pending.as_ref().map(|(found, _)| &found.value)
+    }
+
+    /// Rerun the pending failure once to see that it reproduces (the
+    /// flakiness check) and set up shrinking. Returns whether there is a
+    /// failure to shrink.
+    fn reproduce_pending(&mut self) -> bool {
+        if let Some(shrinking) = &self.shrinking {
+            return !shrinking.flaky;
+        }
+        let Some((found, _)) = self.pending.as_ref() else {
+            return false;
+        };
+        let signature = Signature::of(&found.result).expect("pending failures fail");
+        let value = found.value.clone();
+        let rerun = self.evaluate(value.clone()).0;
+        let flaky = Signature::of(&rerun).as_ref() != Some(&signature);
+        if flaky {
+            self.report.warn(
+                "flaky",
+                "the property did not fail the same way when re-run on the failing input; \
+                 it depends on something other than the input, and the input was not shrunk",
+            );
+        }
+        self.shrinking = Some(Shrinking {
+            signature,
+            flaky,
+            minimal: value,
+            failure: None,
+            stats: ShrinkStats::default(),
+            done: false,
+            started: None,
+        });
+        !flaky
+    }
+
+    /// Whether `candidate` fails the way the pending failure did (same
+    /// kind of failure, same panic site), for loops that shrink by hand.
+    /// Each call is a shrinking step: beyond [`Config::shrink`]'s budget
+    /// the answer is always `false` and the report says the budget ran
+    /// out. `false` without a failure, or when it did not reproduce.
+    pub fn reproduces(&mut self, candidate: &G::Value) -> bool {
+        if !self.reproduce_pending() {
+            return false;
+        }
+        let (iteration, size) =
+            self.pending.as_ref().map_or((0, 0), |(found, _)| (found.iteration, found.size));
+        let Some(shrinking) = self.shrinking.as_mut() else {
+            return false;
+        };
+        let started = *shrinking.started.get_or_insert_with(Instant::now);
+        let budget = &self.config.shrink;
+        if shrinking.stats.steps >= budget.max_steps
+            || budget
+                .timeout_ms
+                .is_some_and(|ms| started.elapsed() >= std::time::Duration::from_millis(ms))
+        {
+            shrinking.stats.budget_exhausted = true;
+            return false;
+        }
+        shrinking.stats.steps += 1;
+        let (same, elapsed) = try_candidate(
+            &mut self.property,
+            &mut self.coverage,
+            &mut self.observations,
+            self.seed,
+            iteration,
+            size,
+            &shrinking.signature,
+            candidate.clone(),
+        );
+        self.report.prop_time += elapsed;
+        if same.is_some() {
+            shrinking.stats.accepted += 1;
+        }
+        shrinking.stats.duration = started.elapsed();
+        same.is_some()
+    }
+
+    /// Record `minimal` as the result of the loop's own shrinking. It is
+    /// tested once more: when it fails the way the original did, the report
+    /// shows it as the shrunk counterexample and [`finish`](Self::finish)
+    /// shrinks no further; otherwise the original stands, with a warning.
+    /// Returns whether it was accepted.
+    pub fn shrunk_to(&mut self, minimal: G::Value) -> bool {
+        if !self.reproduce_pending() {
+            return false;
+        }
+        let (iteration, size) =
+            self.pending.as_ref().map_or((0, 0), |(found, _)| (found.iteration, found.size));
+        let Some(mut shrinking) = self.shrinking.take() else {
+            return false;
+        };
+        let started = *shrinking.started.get_or_insert_with(Instant::now);
+        shrinking.stats.steps += 1;
+        let (same, elapsed) = try_candidate(
+            &mut self.property,
+            &mut self.coverage,
+            &mut self.observations,
+            self.seed,
+            iteration,
+            size,
+            &shrinking.signature,
+            minimal.clone(),
+        );
+        self.report.prop_time += elapsed;
+        shrinking.stats.duration = started.elapsed();
+        shrinking.done = true;
+        let accepted = same.is_some();
+        match same {
+            Some(failure) => {
+                shrinking.stats.accepted += 1;
+                shrinking.minimal = minimal;
+                shrinking.failure = Some(failure);
+            },
+            None => {
+                self.report.warn(
+                    "shrunk_to",
+                    "the input given to shrunk_to does not fail the way the original did; \
+                     the original is reported",
+                );
+            },
+        }
+        self.shrinking = Some(shrinking);
+        accepted
+    }
+
+    /// Shrink the pending failure now with the built-in driver: greedy over
+    /// the generator's candidates, within [`Config::shrink`]'s budget.
+    /// Returns the smallest input that fails the same way; `None` without
+    /// a failure, or when it did not reproduce. [`finish`](Self::finish)
+    /// then reports this result and shrinks no further.
+    pub fn shrink(&mut self) -> Option<&G::Value> {
+        if !self.reproduce_pending() {
+            return None;
+        }
+        let (iteration, size) =
+            self.pending.as_ref().map_or((0, 0), |(found, _)| (found.iteration, found.size));
+        let mut shrinking = self.shrinking.take()?;
+        if !shrinking.done && self.config.shrink.enabled {
+            self.drive_shrink(&mut shrinking, iteration, size);
+        }
+        self.shrinking = Some(shrinking);
+        self.shrinking.as_ref().map(|s| &s.minimal)
+    }
+
+    /// The built-in shrinking driver over `shrinking.minimal`.
+    fn drive_shrink(&mut self, shrinking: &mut Shrinking<G::Value>, iteration: u64, size: usize) {
+        let limit = self.config.report.truncate_debug_at;
+        let generator = &self.generator;
+        let property = &mut self.property;
+        let coverage = &mut self.coverage;
+        let observations = &mut self.observations;
+        let seed = self.seed;
+        let signature = &shrinking.signature;
+        let started = Instant::now();
+        let result = shrink::shrink(
+            &self.config.shrink,
+            shrinking.minimal.clone(),
+            |value| generator.shrink(value),
+            |candidate| {
+                try_candidate(
+                    property,
+                    coverage,
+                    observations,
+                    seed,
+                    iteration,
+                    size,
+                    signature,
+                    candidate,
+                )
+                .0
+            },
+            |value| render(value, limit),
+        );
+        self.report.prop_time += started.elapsed();
+        shrinking.minimal = result.value;
+        shrinking.failure = result.failure;
+        shrinking.stats = result.stats;
+        shrinking.done = true;
+        if shrinking.stats.budget_exhausted {
+            self.report.warn(
+                "shrink_budget",
+                format!(
+                    "shrinking stopped at the budget ({} candidates); raise Config::shrink.max_steps or the \
+                     timeout for a smaller counterexample",
+                    shrinking.stats.steps
+                ),
+            );
+        }
+    }
+
+    /// The report so far.
+    pub fn report(&self) -> &Report {
+        &self.report
+    }
+
+    /// The seed of this run.
+    pub fn seed(&self) -> u64 {
+        self.seed
+    }
+
+    /// Test the remembered inputs first: the replay point
+    /// ([`Config::replay`], `CRABCHECK_REPLAY`) and the property's stored
+    /// regressions. Neither counts as a test. Returns whether one failed,
+    /// in which case the loop should stop and [`finish`](Self::finish)
+    /// reports it.
+    pub fn remembered(&mut self) -> bool {
+        if let Some(point) = self.config.replay {
+            let origin = crate::report::Origin::Replay;
+            let failed = match self.generate(point) {
+                Ok((value, size)) => {
+                    let input = Input {
+                        value,
+                        point: Some(point),
+                        size,
+                        iteration: point.iteration,
+                        origin,
+                        generate: self.last_gen,
+                    };
+                    let (tested, result) = self.test_input(&input, false);
+                    tested.failed().then_some((input, result))
+                },
+                Err(Skipped::Discarded(reason)) => {
+                    self.observe_generation_discard(point, origin, &reason);
+                    None
+                },
+                Err(Skipped::Panicked(_)) => None,
+            };
+            self.report.replay = Some(ReplayOutcome { point, reproduced: failed.is_some() });
+            if let Some((input, result)) = failed {
+                self.pending = Some((
+                    Found {
+                        value: input.value,
+                        point: Some(point),
+                        size: input.size,
+                        iteration: point.iteration,
+                        result,
+                    },
+                    None,
+                ));
+                return true;
+            }
+        }
+
+        #[cfg(feature = "json")]
+        if self.config.regressions.replay {
+            let entries = crate::regressions::load(&self.config.regressions.dir, &self.name);
+            if !entries.is_empty() {
+                self.report.regressions.file =
+                    Some(crate::regressions::path_for(&self.config.regressions.dir, &self.name));
+            }
+            let limit = self.config.report.truncate_debug_at;
+            let max_size = self.config.max_size;
+            for entry in entries {
+                let point = ReplayPoint { seed: entry.seed, iteration: entry.iteration };
+                self.report.regressions.replayed += 1;
+                let Some(value) = self.regenerate(point) else {
+                    self.report.regressions.stale += 1;
+                    self.report.warn("regressions", format!("stored input {point} could not be regenerated (discarded or the generator panicked)"));
+                    continue;
+                };
+                let (debug, _, _) = render(&value, limit);
+                if debug != entry.debug {
+                    self.report.regressions.stale += 1;
+                    self.report.warn(
+                        "regressions",
+                        format!(
+                            "stored input {point} no longer matches the generator (stored {}, regenerated {debug}); \
+                             delete the entry or rerun the property",
+                            entry.debug
+                        ),
+                    );
+                    continue;
+                }
+                let size = size_for(point.seed, point.iteration, max_size);
+                let (result, observed, elapsed) = self.evaluate(value.clone());
+                self.observe(ObservationLine {
+                    origin: "regression",
+                    seed: point.seed,
+                    iteration: point.iteration,
+                    size,
+                    representation: debug.clone(),
+                    result: &result,
+                    observed: Some(&observed),
+                    generate: std::time::Duration::ZERO,
+                    execute: elapsed,
+                    coverage: None,
+                });
+                if Signature::of(&result).is_some() {
+                    self.pending = Some((
+                        Found {
+                            value,
+                            point: Some(point),
+                            size,
+                            iteration: point.iteration,
+                            result,
+                        },
+                        None,
+                    ));
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     /// Fold a worker's statistics into this run.
-    fn absorb(&mut self, mut other: Run<'_, G, P>) {
+    fn absorb(&mut self, mut other: Run<G, P>) {
         let report = &mut self.report;
         report.tests += other.report.tests;
         report.discarded += other.report.discarded;
@@ -1275,17 +1909,19 @@ where
     /// The targeted phase: mutate the best-scoring inputs to push the score
     /// up, looking for a failure along the way.
     fn targeted_search(&mut self) {
-        let config = self.config;
         if self.pool.is_empty() {
             return;
         }
-        let mut rng = ChaCha8Rng::seed_from_u64(mix(self.seed, u64::MAX - 1));
+        let target_tests = self.config.target.tests;
+        let explore = self.config.target.explore;
+        let limit = self.config.report.truncate_debug_at;
+        let timeout = self.config.timeout_duration();
+        let max_discards = (self.config.max_discard_ratio * target_tests as f64).max(0.0) as u64;
         let mut iterations = 0u64;
-        let max_discards = (config.max_discard_ratio * config.target.tests as f64).max(0.0) as u64;
         let mut discarded = 0u64;
 
-        while iterations < config.target.tests {
-            if let Some(timeout) = config.timeout_duration()
+        while iterations < target_tests {
+            if let Some(timeout) = timeout
                 && self.started.elapsed() > timeout
             {
                 self.report.status = Status::TimedOut;
@@ -1296,120 +1932,34 @@ where
                 break;
             }
             iterations += 1;
-            let iteration = self.report.iterations;
-            self.report.iterations += 1;
-
-            if u01(&mut rng) < config.target.explore {
+            let iteration = self.next_iteration();
+            let input = if u01(&mut self.rng) < explore {
                 let point = ReplayPoint { seed: self.seed, iteration };
-                match self.run_point(point, crate::report::Origin::Explore) {
-                    Attempt::GenPanicked(info) => {
-                        self.report.status = Status::Aborted;
-                        self.report.abort = Some(Abort {
-                            message: info.message,
-                            location: info.location,
-                            iteration,
-                        });
-                        break;
-                    },
-                    Attempt::Discarded(reason) => {
+                match self.draw_at(point, crate::report::Origin::Explore) {
+                    Some(input) => input,
+                    None if self.report.status != Status::Passed => break,
+                    None => {
                         discarded += 1;
-                        self.record_discard(reason);
-                    },
-                    Attempt::Passed { size, hash, observed, novel } => {
-                        let score = observed.score;
-                        self.record_pass(
-                            size,
-                            hash,
-                            observed,
-                            crate::report::Origin::Explore,
-                            iteration,
-                            || Provenance::Point(point),
-                        );
-                        self.keep_if_interesting(point, score, novel);
-                    },
-                    Attempt::Failed { size, result } => {
-                        if let Some(value) = self.regenerate(point) {
-                            self.fail(
-                                Found { value, point: Some(point), size, iteration, result },
-                                None,
-                            );
-                        }
-                        break;
+                        continue;
                     },
                 }
+            } else {
+                let Some(seed) = self.pool.pick(&mut self.rng) else { break };
+                match self.mutate_at(&seed.value, iteration) {
+                    Some(input) => input,
+                    None if self.report.status != Status::Passed => break,
+                    None => continue,
+                }
+            };
+            let tested = self.test(&input);
+            if tested.failed() {
+                break;
+            }
+            if tested.discarded() {
+                discarded += 1;
                 continue;
             }
-
-            let Some(seed) = self.pool.pick(&mut rng) else { break };
-            let size = size_for(self.seed, iteration, config.max_size);
-            let mut source = Source::new(mix(self.seed, iteration), size)
-                .with_filter_max_attempts(config.filter_max_attempts);
-            let mutating = Instant::now();
-            let mutant = match panic::catch(|| self.generator.mutate(&seed.value, &mut source)) {
-                Ok(Some(mutant)) => mutant,
-                Ok(None) => continue,
-                Err(info) => {
-                    self.report.status = Status::Aborted;
-                    self.report.abort =
-                        Some(Abort { message: info.message, location: info.location, iteration });
-                    break;
-                },
-            };
-            let mutated_in = mutating.elapsed();
-            self.generated += 1;
-            let hash = debug_hash(&mutant);
-            self.note_distinct(hash);
-            let observing = self.observations.is_some();
-            let before = self.coverage.begin();
-            let (result, observed, elapsed) = self.evaluate(mutant.clone());
-            let covered = self.coverage.end(before, &result, observing);
-            let novel = covered.novel;
-            let limit = config.report.truncate_debug_at;
-            self.stats.slower(elapsed, || Provenance::Debug(render(&mutant, limit).0));
-            if observing {
-                self.observe(ObservationLine {
-                    origin: "mutation",
-                    seed: self.seed,
-                    iteration,
-                    size,
-                    representation: render(&mutant, usize::MAX).0,
-                    result: &result,
-                    observed: Some(&observed),
-                    generate: mutated_in,
-                    execute: elapsed,
-                    coverage: covered.lines,
-                });
-            }
-            match result {
-                Ok(Outcome::Pass) => {
-                    let score = observed.score;
-                    self.record_pass(
-                        size,
-                        hash,
-                        observed,
-                        crate::report::Origin::Mutation,
-                        iteration,
-                        || Provenance::Debug(render(&mutant, limit).0),
-                    );
-                    let guided = self.guided();
-                    match score {
-                        Some(score) if self.pool.improves(score) => {
-                            self.pool.add(mutant, score);
-                        },
-                        Some(score) if novel && guided => self.pool.add_forced(mutant, score),
-                        None if novel && guided => self.pool.add_forced(mutant, 0.0),
-                        _ => {},
-                    }
-                },
-                Ok(Outcome::Discard(reason)) => {
-                    discarded += 1;
-                    self.record_discard(reason);
-                },
-                result => {
-                    self.fail(Found { value: mutant, point: None, size, iteration, result }, None);
-                    break;
-                },
-            }
+            self.keep(input.value, &tested);
         }
 
         if let Some((best_score, best)) = self.pool.best.clone() {
@@ -1418,79 +1968,39 @@ where
                 iterations,
                 improvements: self.pool.improvements,
                 best_score,
-                best_debug: render(&best, config.report.truncate_debug_at).0,
+                best_debug: render(&best, limit).0,
             });
         }
     }
 
-    /// Handle a failing input: check it reproduces, shrink it, remember it,
-    /// and fill in the report.
-    fn fail(&mut self, found: Found<G::Value>, thread: Option<usize>) {
-        let config = self.config;
-        let limit = config.report.truncate_debug_at;
-        let signature =
-            Signature::of(&found.result).expect("fail() is only called for failing results");
+    /// Handle the pending failure: check it reproduces, shrink it (unless
+    /// the loop already did), remember it, and fill in the report.
+    fn fail(&mut self) {
+        let limit = self.config.report.truncate_debug_at;
+        let could_shrink = self.reproduce_pending();
+        let Some((found, thread)) = self.pending.take() else {
+            return;
+        };
+        let Some(mut shrinking) = self.shrinking.take() else {
+            return;
+        };
         let (kind, mut message, mut location) = details(found.result);
         let (debug, truncated, _) = render(&found.value, limit);
+        let flaky = shrinking.flaky;
 
-        let rerun = self.evaluate(found.value.clone()).0;
-        let flaky = Signature::of(&rerun).as_ref() != Some(&signature);
-        if flaky {
-            self.report.warn(
-                "flaky",
-                "the property did not fail the same way when re-run on the failing input; \
-                 it depends on something other than the input, and the input was not shrunk",
-            );
+        if could_shrink
+            && self.config.shrink.enabled
+            && !shrinking.done
+            && shrinking.stats.steps == 0
+        {
+            self.drive_shrink(&mut shrinking, found.iteration, found.size);
         }
-
         let mut shrunk = None;
         let mut shrink_stats = None;
-        let mut minimal = found.value.clone();
-        if config.shrink.enabled && !flaky {
-            let generator = self.generator;
-            let property = &mut self.property;
-            let coverage = &mut self.coverage;
-            let observations = &mut self.observations;
-            let seed = self.seed;
-            let started = Instant::now();
-            let result = shrink::shrink(
-                &config.shrink,
-                found.value.clone(),
-                |value| generator.shrink(value),
-                |candidate| {
-                    let observing = observations.is_some();
-                    let representation =
-                        if observing { render(&candidate, usize::MAX).0 } else { String::new() };
-                    let before = coverage.begin();
-                    let ran = Instant::now();
-                    let (outcome, observed) = evaluate(property, candidate);
-                    let elapsed = ran.elapsed();
-                    let covered = coverage.end(before, &outcome, observing);
-                    if let Some(observations) = observations.as_mut() {
-                        observations.record(ObservationLine {
-                            origin: "shrink",
-                            seed,
-                            iteration: found.iteration,
-                            size: found.size,
-                            representation,
-                            result: &outcome,
-                            observed: Some(&observed),
-                            generate: std::time::Duration::ZERO,
-                            execute: elapsed,
-                            coverage: covered.lines,
-                        });
-                    }
-                    (Signature::of(&outcome).as_ref() == Some(&signature)).then(|| {
-                        let (_, message, location) = details(outcome);
-                        (message, location)
-                    })
-                },
-                |value| render(value, limit),
-            );
-            self.report.prop_time += started.elapsed();
-            minimal = result.value.clone();
-            if let Some((shrunk_message, shrunk_location)) = result.failure {
-                let (debug, truncated, _) = render(&result.value, limit);
+        let minimal = shrinking.minimal.clone();
+        if shrinking.done || shrinking.stats.steps > 0 {
+            if let Some((shrunk_message, shrunk_location)) = shrinking.failure {
+                let (debug, truncated, _) = render(&minimal, limit);
                 shrunk = Some(Counterexample {
                     debug,
                     truncated,
@@ -1501,24 +2011,14 @@ where
                 message = shrunk_message;
                 location = shrunk_location;
             }
-            if result.stats.budget_exhausted {
-                self.report.warn(
-                    "shrink_budget",
-                    format!(
-                        "shrinking stopped at the budget ({} candidates); raise Config::shrink.max_steps or the \
-                         timeout for a smaller counterexample",
-                        result.stats.steps
-                    ),
-                );
-            }
-            shrink_stats = Some(result.stats);
+            shrink_stats = Some(shrinking.stats);
         }
         #[cfg(feature = "coverage")]
         if self.coverage.spectrum.is_some() && !flaky {
             // Passing and failing neighbours of the minimal input sharpen the
             // spectrum where it matters.
             let neighbourhood = mix(self.seed, u64::MAX - 3);
-            for i in 0..config.locate.neighbourhood as u64 {
+            for i in 0..self.config.locate.neighbourhood as u64 {
                 let mut source = Source::new(mix(neighbourhood, i), found.size);
                 if let Some(mutant) = self.generator.mutate(&minimal, &mut source) {
                     let observing = self.observations.is_some();
@@ -1545,7 +2045,7 @@ where
             }
             let panic = location.as_ref().map(|l| (l.file.as_str(), l.line));
             self.report.locate =
-                self.coverage.spectrum.as_ref().map(|s| s.rank(panic, config.locate.top));
+                self.coverage.spectrum.as_ref().map(|s| s.rank(panic, self.config.locate.top));
         }
         // Like Hypothesis's "minimal failing case", the observation file ends
         // with the shrunk input, run once more so Tyche lists it first.
@@ -1569,7 +2069,7 @@ where
         }
 
         #[cfg(feature = "json")]
-        if config.regressions.save
+        if self.config.regressions.save
             && !flaky
             && let Some(point) = found.point
         {
@@ -1580,7 +2080,7 @@ where
                 debug.clone(),
                 shrunk.as_ref().map(|c| c.debug.clone()),
             );
-            match crate::regressions::save(&config.regressions.dir, &entry) {
+            match crate::regressions::save(&self.config.regressions.dir, &entry) {
                 Ok((path, appended)) => {
                     self.report.regressions.file = Some(path);
                     self.report.regressions.saved = appended;
@@ -1588,7 +2088,7 @@ where
                 Err(e) => {
                     self.report.warn(
                         "regressions",
-                        format!("could not write {}: {e}", config.regressions.dir.display()),
+                        format!("could not write {}: {e}", self.config.regressions.dir.display()),
                     )
                 },
             }
@@ -1613,8 +2113,25 @@ where
         });
     }
 
-    /// Final statistics, health checks and report output.
-    fn finish(mut self) -> Report {
+    /// Shrink, localize and remember the failure if there was one, then
+    /// the final statistics, health checks and report output (JSON,
+    /// observations, profile, the coverage grid).
+    pub fn finish(mut self) -> Report {
+        if self.pending.is_some() {
+            self.fail();
+        }
+        if self.report.target.is_none()
+            && self.mutations > 0
+            && let Some((best_score, best)) = self.pool.best.clone()
+        {
+            self.report.target = Some(TargetSummary {
+                scored: self.saw_score,
+                iterations: self.mutations,
+                improvements: self.pool.improvements,
+                best_score,
+                best_debug: render(&best, self.config.report.truncate_debug_at).0,
+            });
+        }
         self.report.duration = self.started.elapsed();
         self.report.distinct_inputs_ratio =
             if self.generated == 0 { 1.0 } else { self.seen.len() as f64 / self.generated as f64 };
@@ -1756,7 +2273,7 @@ where
                 }
             }
         }
-        health::assess(&mut self.report, self.config);
+        health::assess(&mut self.report, &self.config);
         #[cfg(feature = "json")]
         if let Some(path) = &self.config.report.json_path {
             use std::io::Write;
@@ -2679,6 +3196,148 @@ mod tests {
                 report.health
             );
         }
+    }
+
+    #[test]
+    fn hand_written_loops_replay_by_seed() {
+        fn climb(seed: u64) -> Report {
+            let mut config = cfg();
+            config.seed = Some(seed);
+            config.tests = 100;
+            config.max_size = 20;
+            let mut run = Run::new(&config, gens::vec(gens::int(0i32..=9)), |v: Vec<i32>| {
+                let sum: i32 = v.iter().sum();
+                crate::target(f64::from(sum));
+                sum < 500
+            });
+            while run.wants_more() {
+                let Some(input) = run.draw() else { continue };
+                let tested = run.test(&input);
+                if tested.passed() {
+                    run.keep(input.value, &tested);
+                }
+            }
+            for _ in 0..200 {
+                if run.report().status != Status::Passed {
+                    break;
+                }
+                let Some(parent) = run.pool_pick() else { break };
+                let Some(child) = run.mutate(&parent) else { continue };
+                let tested = run.test(&child);
+                if tested.failed() {
+                    break;
+                }
+                run.keep(child.value, &tested);
+            }
+            run.finish()
+        }
+        let a = climb(11);
+        let b = climb(11);
+        assert_eq!(a.status, Status::Passed, "{a}");
+        assert_eq!((a.tests, a.iterations), (b.tests, b.iterations));
+        assert_eq!(a.iterations, 300, "100 draws and 200 mutations: {a}");
+        assert_eq!(a.tests + a.discarded, a.iterations, "passing mutants count as tests");
+        let target = a.target.as_ref().expect("mutations are summarised");
+        assert_eq!(target.iterations, 200);
+        assert_eq!(target.best_score, b.target.as_ref().unwrap().best_score);
+        assert_ne!(climb(12).seed, a.seed);
+    }
+
+    #[test]
+    fn a_failure_found_by_mutation_is_reported_without_a_replay_point() {
+        let mut config = cfg();
+        config.seed = Some(5);
+        config.max_size = 8;
+        let mut run = Run::new(&config, gens::vec(gens::int(0i32..=9)), |v: Vec<i32>| v.is_empty());
+        let input = loop {
+            if let Some(input) = run.draw()
+                && !input.value.is_empty()
+            {
+                break input;
+            }
+        };
+        assert!(input.replay().is_some(), "drawn inputs regenerate from a point");
+        let mutant = loop {
+            if let Some(mutant) = run.mutate(&input.value) {
+                break mutant;
+            }
+        };
+        assert!(mutant.replay().is_none(), "mutants do not");
+        assert_eq!(mutant.origin(), crate::report::Origin::Mutation);
+        let tested = run.test(&mutant);
+        assert!(tested.failed());
+        assert!(!run.wants_more(), "a failure stops the loop");
+        let report = run.finish();
+        assert_eq!(report.status, Status::Failed, "{report}");
+        let failure = report.failure.expect("failure");
+        assert!(failure.replay.is_none(), "found by mutation: {failure:?}");
+        assert_eq!(failure.original.iteration, mutant.iteration());
+        assert_eq!(report.tests, 0, "nothing passed");
+    }
+
+    #[test]
+    fn loops_can_shrink_on_their_own_terms() {
+        fn failing_run() -> Run<impl Gen<Value = Vec<i32>>, impl FnMut(Vec<i32>) -> bool> {
+            let mut config = cfg();
+            config.seed = Some(3);
+            config.max_size = 30;
+            let mut run = Run::new(&config, gens::vec(gens::int(0i32..=9)), |v: Vec<i32>| {
+                v.iter().sum::<i32>() < 20
+            });
+            while run.wants_more() {
+                let Some(input) = run.draw() else { continue };
+                run.test(&input);
+            }
+            assert!(run.failure().is_some(), "{}", run.report());
+            run
+        }
+
+        // The built-in driver, on demand.
+        let mut run = failing_run();
+        let original = run.failure().unwrap().clone();
+        assert!(run.reproduces(&original), "the original reproduces");
+        assert!(!run.reproduces(&vec![]), "an empty list passes");
+        let minimal = run.shrink().unwrap().clone();
+        let sum: i32 = minimal.iter().sum();
+        assert!(
+            sum >= 20 && sum <= original.iter().sum() && minimal.len() <= original.len(),
+            "{minimal:?}"
+        );
+        let report = run.finish();
+        let failure = report.failure.expect("failed");
+        assert_eq!(failure.shrunk.as_ref().map(|c| c.debug.clone()), Some(format!("{minimal:?}")));
+        assert!(failure.shrink.unwrap().steps >= 3, "the loop's steps count too");
+
+        // A greedy shrinker written by hand: drop one element at a time.
+        let mut run = failing_run();
+        let mut current = run.failure().unwrap().clone();
+        'outer: loop {
+            for i in 0..current.len() {
+                let mut candidate = current.clone();
+                candidate.remove(i);
+                if run.reproduces(&candidate) {
+                    current = candidate;
+                    continue 'outer;
+                }
+            }
+            break;
+        }
+        assert!(run.shrunk_to(current.clone()));
+        let report = run.finish();
+        let failure = report.failure.as_ref().expect("failed");
+        assert_eq!(failure.shrunk.as_ref().map(|c| c.debug.clone()), Some(format!("{current:?}")));
+        assert!(
+            current.iter().sum::<i32>() >= 20 && current.iter().sum::<i32>() < 30,
+            "{current:?}"
+        );
+        assert!(!report.health.iter().any(|w| w.kind == "shrunk_to"), "{report}");
+
+        // A wrong claim is refused.
+        let mut run = failing_run();
+        assert!(!run.shrunk_to(vec![1]));
+        let report = run.finish();
+        assert!(report.health.iter().any(|w| w.kind == "shrunk_to"), "{report}");
+        assert!(report.failure.unwrap().shrunk.is_none(), "the original stands");
     }
 
     #[test]

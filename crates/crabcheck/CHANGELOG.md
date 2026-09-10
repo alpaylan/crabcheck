@@ -122,6 +122,21 @@ library verifies them and makes every failure reproducible from its seed.
   agent do it), run, see the outcome. Standard-library HTTP on 127.0.0.1
   only; cross-site requests are refused; the only thing it starts is
   `cargo`.
+- `Run`: the testing loop as public steps, for loops written by hand.
+  `Run::new` applies the environment, chooses the seed and starts
+  coverage; `draw`, `test`, `keep`, `keep_always`, `pool_pick`, `mutate`
+  and `wants_more` are the steps; `remembered` replays the stored inputs;
+  `finish` shrinks, localizes, remembers and reports. `check` and
+  `check_par` are written on top of them (the report snapshots did not
+  change), and `examples/custom_loop.rs` climbs a score with patience
+  instead of the built-in targeted phase. `Input` carries a value with its
+  replay point (mutants have none), `Tested` the verdict, novelty and
+  score. Shrinking is a step too: `shrink` runs the built-in driver on
+  the failure on demand, `reproduces` asks whether a candidate fails the
+  same way (a shrinking step within `Config::shrink`'s budget) and
+  `shrunk_to` records the loop's own result; `failure` and `generator`
+  give a loop what it needs to write a shrinker. The coverage lock
+  became a `Lease` that may move between threads, so a `Run` can own it.
 - The property's own function (the closure passed to `check`, or the
   body of a `#[crabcheck::test]`) is always tracked, whichever crate it
   lives in, and the grid page pins it above the tree.

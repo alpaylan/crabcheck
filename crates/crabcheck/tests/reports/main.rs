@@ -259,7 +259,7 @@ fn examples_print_the_same_reports() {
         exe.parent().and_then(Path::parent).expect("target profile dir").join("examples");
     let workdir = std::env::temp_dir().join(format!("crabcheck-examples-{}", std::process::id()));
     std::fs::create_dir_all(&workdir).expect("workdir");
-    for name in ["bst", "insertion_sort", "sort_performance"] {
+    for name in ["bst", "insertion_sort", "sort_performance", "custom_loop"] {
         let binary = examples.join(name);
         if !binary.exists() {
             eprintln!(

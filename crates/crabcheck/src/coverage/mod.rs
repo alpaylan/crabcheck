@@ -134,6 +134,7 @@ pub use {
         Delta,
         Function,
         Functions,
+        Lease,
         Snapshot,
         available,
         hits_by_function,
