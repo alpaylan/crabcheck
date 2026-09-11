@@ -150,6 +150,11 @@ library verifies them and makes every failure reproducible from its seed.
   a failure it shrinks, then tests mutants of the minimal input until the
   top suspect of `Run::suspects` (the ranking as it stands) has not
   changed for a while. Examples `shipped_loops` and `perf_fuzz`.
+- Coverage novelty only counts the tracked functions. The tracker
+  snapshots one contiguous window of counters, which also holds whatever
+  the linker placed between the tracked functions; those counters no
+  longer make an input novel, so `novel_inputs`, the guided search's
+  seeds and the plateau warning no longer depend on the binary's layout.
 - The property's own function (the closure passed to `check`, or the
   body of a `#[crabcheck::test]`) is always tracked, whichever crate it
   lives in, and the grid page pins it above the tree.

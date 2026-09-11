@@ -138,17 +138,19 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: examples/locate-demo
+      # The demo's .cargo/config.toml supplies -C instrument-coverage, but
+      # any RUSTFLAGS in the environment, even an empty one, replaces the
+      # config's flags, and the workflow sets RUSTFLAGS globally; so the
+      # flag is repeated here.
       - run: cargo test
         working-directory: examples/locate-demo
         env:
-          # The demo's .cargo/config.toml supplies -C instrument-coverage;
-          # RUSTFLAGS would replace it, so keep it empty.
-          RUSTFLAGS: ""
+          RUSTFLAGS: -D warnings -C instrument-coverage
           RUST_TEST_THREADS: "1"
       - run: cargo run
         working-directory: examples/locate-demo
         env:
-          RUSTFLAGS: ""
+          RUSTFLAGS: -D warnings -C instrument-coverage
 
   publish:
     name: Publish crabcheck

@@ -144,7 +144,14 @@ impl Tracker {
         let mut grew = false;
         for &(index, count) in delta.hits() {
             let slot = index - self.window.start;
-            if self.touched_by[slot] == 0 && self.selected_mask[slot] {
+            // The window is one contiguous range, so it also holds counters
+            // of whatever the linker placed between the selected functions;
+            // those are bystanders and count for nothing, or novelty would
+            // depend on the binary's layout.
+            if !self.selected_mask[slot] {
+                continue;
+            }
+            if self.touched_by[slot] == 0 {
                 self.hit_so_far += 1;
                 grew = true;
             }
