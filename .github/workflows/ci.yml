@@ -28,7 +28,8 @@ jobs:
         with:
           toolchain: nightly-2026-03-26
           components: rustfmt
-      - run: cargo fmt --all --check
+      # Named explicitly: the installed toolchain is not the default.
+      - run: cargo +nightly-2026-03-26 fmt --all --check
 
   clippy:
     name: Clippy
