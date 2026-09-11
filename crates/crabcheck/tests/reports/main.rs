@@ -61,8 +61,15 @@ fn settings(paths: &[&Path]) -> insta::Settings {
     settings.add_filter(r#"\{\s*"secs": \d+,\s*"nanos": \d+\s*\}"#, r#""[duration]""#);
     settings.add_filter(r#""created": \d+"#, r#""created": "[time]""#);
     for path in paths {
-        settings.add_filter(&regex_escape(&path.display().to_string()), "[dir]");
+        let raw = path.display().to_string();
+        // JSON escapes the backslashes of a Windows path, so the directory
+        // appears in two spellings; both become `[dir]`, and the separator
+        // that follows becomes a slash.
+        settings.add_filter(&regex_escape(&raw.replace('\\', "\\\\")), "[dir]");
+        settings.add_filter(&regex_escape(&raw), "[dir]");
     }
+    settings.add_filter(r"\[dir\]\\\\", "[dir]/");
+    settings.add_filter(r"\[dir\]\\", "[dir]/");
     // Suspects carry absolute paths; the workspace root is this machine's.
     if let Some(root) = Path::new(env!("CARGO_MANIFEST_DIR")).ancestors().nth(2) {
         settings
