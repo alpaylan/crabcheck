@@ -485,7 +485,7 @@ pub fn load_panic_locations(coverage_dir: &Path) -> Vec<PanicLocation> {
     let Ok(file) = File::open(&path) else { return Vec::new() };
     let mut out: std::collections::BTreeSet<PanicLocation> = Default::default();
     let bt_re = regex_lite_at();
-    for line in BufReader::new(file).lines().flatten() {
+    for line in BufReader::new(file).lines().map_while(Result::ok) {
         let trimmed = line.trim();
         if trimmed.is_empty() {
             continue;

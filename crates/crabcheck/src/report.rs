@@ -1,7 +1,7 @@
 //! The outcome of a run: [`Report`] and its parts.
 //!
 //! A report is both human-readable (`Display`) and, with the default `json`
-//! feature, machine-readable ([`Report::to_json`]). Everything an author or
+//! feature, machine-readable (`Report::to_json`). Everything an author or
 //! an agent needs to act on a failure is in it: the seed, the replay point,
 //! the failing input before and after shrinking, the panic message and
 //! location, timing, and the distribution statistics collected while the

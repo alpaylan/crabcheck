@@ -15,7 +15,8 @@
 //!   [`target`](crate::target).
 //! - [`perf_fuzz`]: how long the property took, for finding slow inputs.
 //!
-//! After a failure, [`localize`] is a loop of a different kind: it keeps
+//! After a failure, `localize` (feature `coverage`) is a loop of a
+//! different kind: it keeps
 //! testing inputs around the minimal failing one until the ranking of
 //! suspect functions stops changing.
 //!

@@ -22,7 +22,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly
+      # Pinned: the repository is formatted with this nightly's rustfmt, and
+      # rustfmt's output drifts between nightlies.
+      - uses: dtolnay/rust-toolchain@nightly-2026-03-26
         with:
           components: rustfmt
       - run: cargo fmt --all --check

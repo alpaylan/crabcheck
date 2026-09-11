@@ -46,7 +46,9 @@ fn install() {
             }
             let message = payload_message(info.payload());
             let location = info.location().map(|l| {
-                Location { file: l.file().to_string(), line: l.line(), column: l.column() }
+                // Forward slashes on every platform, so reports, targets and
+                // snapshots read the same on Windows.
+                Location { file: l.file().replace('\\', "/"), line: l.line(), column: l.column() }
             });
             SLOT.with(|slot| *slot.borrow_mut() = Some(PanicInfo { message, location }));
         }));

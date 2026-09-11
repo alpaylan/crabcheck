@@ -23,7 +23,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if args.len() < 4 {
         eprintln!(
             "Usage: {} <coverage_data_path> <module> <binary_path> [--print-json]",
-            args.get(0).map(|s| s.as_str()).unwrap_or("fast-analyze")
+            args.first().map(|s| s.as_str()).unwrap_or("fast-analyze")
         );
         std::process::exit(1);
     }

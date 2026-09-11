@@ -30,7 +30,8 @@
 //!   the report says which functions of the crate under test each property
 //!   reached, inputs that reach new code seed the targeted search, and a
 //!   failure comes with the functions ranked by how much their coverage
-//!   separates failing runs from passing ones (see [`coverage`]).
+//!   separates failing runs from passing ones (the `coverage` module,
+//!   behind the feature of the same name).
 //!
 //! 0.2 is a rewrite of the 0.1 prototype and its API is not yet frozen.
 //!
