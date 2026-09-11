@@ -13,8 +13,6 @@ env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
   RUSTDOCFLAGS: -D warnings
-
-env:
   # Snapshot drift fails the build; accept changes locally with `cargo insta review`.
   INSTA_UPDATE: "no"
 
